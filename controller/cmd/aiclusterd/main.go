@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"aicluster/controller/core"
+	"aicluster/controller/gateway"
 	"aicluster/controller/web"
 )
 
@@ -24,10 +25,14 @@ var version = "0.2.0-dev"
 
 func main() {
 	cfg := core.Config{Version: version}
-	var mgmtListen, advertise, beaconTargets, logLevel string
+	var mgmtListen, gatewayListen, advertise, beaconTargets, logLevel string
 	flag.StringVar(&cfg.DataDir, "data-dir", "/var/lib/aicluster/controller", "persistent state directory")
 	flag.StringVar(&cfg.NodeAPIListen, "nodeapi-listen", ":7443", "Slave-facing mTLS API")
 	flag.StringVar(&mgmtListen, "mgmt-listen", ":8090", "management API (CLI, dashboard)")
+	flag.StringVar(&gatewayListen, "gateway-listen", ":8080", "OpenAI-compatible API for clients (empty disables)")
+	var gwCfg gateway.Config
+	flag.IntVar(&gwCfg.MaxQueue, "gateway-max-queue", 64, "requests that may wait per model when all its nodes are busy")
+	flag.DurationVar(&gwCfg.QueueTimeout, "gateway-queue-timeout", 60*time.Second, "how long a request may wait for a free node")
 	flag.StringVar(&advertise, "advertise", "", "comma-separated node-API URLs given to Slaves (default: all local IPv4s)")
 	flag.StringVar(&cfg.BeaconListen, "beacon-listen", ":47800", "UDP beacon listen address (empty disables)")
 	flag.IntVar(&cfg.BeaconPort, "beacon-port", 47800, "UDP beacon port for controller announcements")
@@ -65,9 +70,23 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	srv := web.New(c, log)
+	var gw *gateway.Gateway
+	var gwLn net.Listener
+	if gatewayListen != "" {
+		if gwLn, err = net.Listen("tcp", gatewayListen); err != nil {
+			log.Error("gateway listen failed", "err", err)
+			os.Exit(1)
+		}
+		gw = gateway.New(c, gwCfg, log.With("component", "gateway"))
+		srv.WithGateway(gw, gwLn.Addr().(*net.TCPAddr).Port)
+	}
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return c.Run(ctx) })
-	g.Go(func() error { return web.New(c, log).Serve(ctx, mgmtLn) })
+	g.Go(func() error { return srv.Serve(ctx, mgmtLn) })
+	if gw != nil {
+		g.Go(func() error { return gw.Serve(ctx, gwLn) })
+	}
 	if err := g.Wait(); err != nil {
 		log.Error("controller stopped", "err", err)
 		os.Exit(1)

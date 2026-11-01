@@ -112,6 +112,16 @@ var migrations = []string{
 		created_at INTEGER NOT NULL
 	)`,
 	`CREATE INDEX assignments_node ON assignments(node_id)`,
+	`CREATE TABLE api_keys (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		prefix TEXT NOT NULL UNIQUE,
+		hash TEXT NOT NULL,
+		models TEXT NOT NULL DEFAULT '[]',
+		rpm INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		last_used_at INTEGER NOT NULL DEFAULT 0
+	)`,
 }
 
 func Open(path string) (*Store, error) {

@@ -88,6 +88,7 @@ func (a *Agent) heartbeatOnce(ctx context.Context, client *http.Client, ad *adop
 		Addrs:  discovery.LocalIPv4s(),
 		Health: inventory.Health(a.cfg.ModelDir),
 	}
+	hb.Health.Inference = proto.InferenceLoad{InFlight: int(a.infer.inFlight.Load()), Slots: a.cfg.InferenceSlots}
 	nodeID := a.nodeID
 	lastObs, lastSent := a.lastObs, a.lastObsSent
 	a.mu.Unlock()

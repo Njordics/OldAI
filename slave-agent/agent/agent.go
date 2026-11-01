@@ -57,6 +57,11 @@ type Config struct {
 	RegistryShimListen string
 	// ReconcileEvery is the model reconcile period (default 15 s).
 	ReconcileEvery time.Duration
+	// InferenceSlots is how many requests the runtime serves at once
+	// (Ollama's OLLAMA_NUM_PARALLEL); the gateway balances on it.
+	InferenceSlots int
+	// FakeLabel names this node in the fake runtime's replies.
+	FakeLabel string
 }
 
 func (c *Config) defaults() {
@@ -90,6 +95,9 @@ func (c *Config) defaults() {
 	if c.ReconcileEvery == 0 {
 		c.ReconcileEvery = 15 * time.Second
 	}
+	if c.InferenceSlots == 0 {
+		c.InferenceSlots = 4
+	}
 }
 
 type Agent struct {
@@ -120,6 +128,7 @@ type Agent struct {
 	stateC chan struct{} // nudges the announcer (state change)
 
 	rt         runtime.Runtime
+	infer      inferStats
 	reconcileC chan struct{}
 	shimLn     net.Listener
 	shimMu     sync.Mutex
@@ -149,6 +158,9 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	case "fake":
 		f := runtime.NewFake(cfg.ModelDir)
 		f.BytesPerSec = cfg.FakeBytesPerSec
+		if f.Label = cfg.FakeLabel; f.Label == "" {
+			f.Label, _ = os.Hostname()
+		}
 		a.rt = f
 	case "none":
 	default:

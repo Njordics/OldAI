@@ -324,6 +324,56 @@ fieldset.field legend { font-weight: 550; font-size: 13px; padding: 0; margin-bo
 .node-picks:not(.picking) .node-pick { cursor: default; }
 .search-full { max-width: none; margin: 12px 0 0; }
 
+/* Chat playground */
+.view-chat { display: flex; flex-direction: column; height: calc(100vh - 56px); max-width: 900px; padding-bottom: 16px; }
+.view-chat[hidden] { display: none; }
+.chat-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.chat-model { flex: 1; min-width: 0; }
+.chat-settings { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 14px 14px; margin-bottom: 12px; }
+.field-inline input { max-width: 100px; }
+textarea {
+  font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; width: 100%; resize: vertical;
+}
+.chat-log {
+  flex: 1; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; display: flex; flex-direction: column; gap: 14px;
+}
+.chat-empty { margin: auto; text-align: center; max-width: 420px; }
+.msg { max-width: 85%; display: grid; gap: 4px; }
+.msg-user { align-self: flex-end; }
+.msg-assistant { align-self: flex-start; }
+.msg-body { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 14px; border-radius: 14px; line-height: 1.5; }
+.msg-user .msg-body { background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
+.msg-assistant .msg-body { background: var(--surface-2); border-bottom-left-radius: 4px; }
+.msg-error .msg-body { background: var(--bad-soft); color: var(--bad); }
+.msg-meta { font-size: 12px; color: var(--muted); padding: 0 6px; }
+.chat-form { display: flex; gap: 8px; margin-top: 12px; align-items: flex-end; }
+.chat-form textarea { resize: none; }
+.chat-hint { text-align: center; }
+
+/* Connect */
+.lead { margin: -8px 0 16px; max-width: 760px; }
+.copy-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.copy-row select, .copy-row code { flex: 1; min-width: 0; }
+.key-reveal { border: 1px solid var(--ok); background: var(--ok-soft); border-radius: 10px; padding: 12px 14px; margin: 10px 0; }
+.secret { display: block; padding: 8px 10px; overflow-wrap: anywhere; user-select: all; background: var(--surface); }
+table.keys { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.keys th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.keys td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.keys td.actions { text-align: right; }
+.key-form { display: grid; grid-template-columns: 2fr 1fr; gap: 0 12px; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 4px; }
+.key-form fieldset, .key-form .error, .key-form > .btn { grid-column: 1 / -1; }
+.key-form > .btn { justify-self: start; margin-top: 12px; }
+.key-models { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0 12px; }
+.key-models .check { margin-top: 6px; font-family: var(--mono); font-size: 12.5px; }
+.snippet {
+  background: var(--surface-2); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 12px 0 0;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.5; white-space: pre;
+}
+#snippet-tabs { margin-top: 8px; }
+.copy-row .hint { flex: 1; margin: 0; }
+
 /* Responsive */
 @media (max-width: 960px) { .hide-md { display: none; } }
 @media (max-width: 720px) {
@@ -335,6 +385,11 @@ fieldset.field legend { font-weight: 550; font-size: 13px; padding: 0; margin-bo
   .hide-sm { display: none; }
   .search { max-width: none; margin-left: 0; }
   .placement { grid-template-columns: 1fr; gap: 6px; }
+  .tabs { overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs a { padding: 0 8px; white-space: nowrap; }
+  .key-form { grid-template-columns: 1fr; }
+  .msg { max-width: 95%; }
   .pl-actions { justify-content: flex-start; }
   .nodes th, .nodes td { padding: 10px; }
 }

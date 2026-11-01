@@ -17,12 +17,15 @@ import (
 	"aicluster/common/pki"
 	"aicluster/common/proto"
 	"aicluster/controller/core"
+	"aicluster/controller/gateway"
 	"aicluster/controller/store"
 )
 
 type Server struct {
-	core *core.Core
-	log  *slog.Logger
+	core   *core.Core
+	log    *slog.Logger
+	gw     *gateway.Gateway
+	gwPort int
 }
 
 func New(c *core.Core, log *slog.Logger) *Server { return &Server{core: c, log: log} }
@@ -37,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/v1/settings", s.getSettings)
 	api.HandleFunc("PUT /api/v1/settings", s.putSettings)
 	s.modelRoutes(api)
+	s.keyRoutes(api)
 
 	ui, _ := fs.Sub(uiFiles, "ui")
 	mux := http.NewServeMux()
@@ -114,6 +118,7 @@ type ClusterInfo struct {
 	ControllerFP string   `json:"controller_fp"`
 	Endpoints    []string `json:"endpoints"`
 	AdoptionMode string   `json:"adoption_mode"`
+	GatewayURLs  []string `json:"gateway_urls"`
 }
 
 func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +128,7 @@ func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {
 		ControllerFP: s.core.CertFP(),
 		Endpoints:    s.core.Endpoints(),
 		AdoptionMode: s.core.Mode(),
+		GatewayURLs:  s.gatewayURLs(),
 	})
 }
 

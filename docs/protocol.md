@@ -424,7 +424,9 @@ Routing:
 4. All candidates at capacity → enqueue in a per-model FIFO (`max_queue` default 64, `queue_timeout` default 60 s) → `429 queue_full` / `503 queue_timeout` with `Retry-After`.
 5. Failover: connect error, TLS error, or 502/503 **before the first response byte** → mark the node suspect for 10 s and retry on the next candidate (max 2 retries). Never retry after bytes are streamed.
 
-API keys: created via CLI/dashboard, stored as argon2id hashes, optional per-key `models` allow-list and `rpm` limit. Response header `X-AICluster-Node` names the serving node (can be disabled).
+API keys: `aic_` + 40 base32 characters (200 random bits), created via CLI (`aicluster keys create`) or the dashboard's Connect page and shown once. Stored as SHA-256 (a slow password hash adds nothing for a random secret this long, and the gateway checks the key on every request); the first 8 characters are kept to look the row up and to display. Optional per-key `models` allow-list and `rpm` limit. Errors use OpenAI's `{"error":{"message","type","code"}}` shape (`missing_api_key`, `invalid_api_key`, `model_not_allowed`, `model_not_found`, `rate_limit_exceeded`, `queue_full`, `queue_timeout`, `no_healthy_node`).
+
+The dashboard's chat playground calls the same routing code through `POST /api/v1/playground/chat/completions` with the admin session instead of a key. Response header `X-AICluster-Node` names the serving node (can be disabled).
 
 ---
 

@@ -43,6 +43,8 @@ func main() {
 	fs.StringVar(&cfg.Runtime, "runtime", "ollama", "inference runtime: ollama | fake (dev: real pulls, no inference) | none")
 	fs.StringVar(&cfg.OllamaURL, "ollama-url", "http://127.0.0.1:11434", "local Ollama API")
 	fs.StringVar(&cfg.RegistryShimListen, "registry-shim-listen", "127.0.0.1:7452", "loopback address the runtime pulls models from")
+	fs.StringVar(&cfg.FakeLabel, "fake-label", "", "name the fake runtime uses for this node in its replies")
+	fs.IntVar(&cfg.InferenceSlots, "inference-slots", 4, "requests the runtime serves at once (match OLLAMA_NUM_PARALLEL)")
 	var fakeMBps int64
 	fs.Int64Var(&fakeMBps, "fake-mbps", 0, "throttle the fake runtime's pulls (MB/s, 0 = unlimited)")
 	_ = fs.Parse(args)

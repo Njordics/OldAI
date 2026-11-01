@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="/ui/app.css">
   <script src="/ui/app.js" defer></script>
   <script src="/ui/models.js" defer></script>
+  <script src="/ui/chat.js" defer></script>
+  <script src="/ui/connect.js" defer></script>
 </head>
 <body>
   <!-- Sign-in -->
@@ -50,6 +52,8 @@
       <nav class="tabs" aria-label="Sections">
         <a href="#nodes" data-tab="nodes">Nodes</a>
         <a href="#models" data-tab="models">Models</a>
+        <a href="#chat" data-tab="chat">Chat</a>
+        <a href="#connect" data-tab="connect">Connect</a>
         <a href="#settings" data-tab="settings">Settings</a>
       </nav>
       <div class="topbar-right">
@@ -102,6 +106,66 @@
       </div>
       <div id="catalog-error" class="banner bad" hidden></div>
       <div id="catalog" class="catalog"></div>
+    </section>
+
+    <!-- Chat playground -->
+    <section id="view-chat" class="view view-chat" hidden>
+      <div class="chat-bar">
+        <label class="chat-model"><span class="sr-only">Model</span><select id="chat-model"></select></label>
+        <button id="chat-settings-toggle" class="btn btn-sm btn-ghost" type="button" aria-expanded="false" aria-controls="chat-settings">Settings</button>
+        <button id="chat-new" class="btn btn-sm" type="button">New chat</button>
+      </div>
+      <div id="chat-settings" class="chat-settings" hidden>
+        <label class="field"><span>System prompt</span><textarea id="chat-system" rows="2" placeholder="You are a helpful assistant."></textarea></label>
+        <label class="field field-inline"><span>Temperature</span><input id="chat-temp" type="number" min="0" max="2" step="0.1" value="0.7"></label>
+      </div>
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <form id="chat-form" class="chat-form">
+        <textarea id="chat-input" rows="2" placeholder="Message the model. Enter to send, Shift+Enter for a new line." aria-label="Message"></textarea>
+        <button id="chat-send" class="btn btn-primary" type="submit">Send</button>
+      </form>
+      <p class="hint chat-hint">The playground goes through the same gateway as API clients. Answers come from the node shown under each reply.</p>
+    </section>
+
+    <!-- Connect -->
+    <section id="view-connect" class="view" hidden>
+      <h1>Connect apps and code</h1>
+      <p class="muted lead">Any tool that speaks the OpenAI API can use this cluster: set its base URL to the address below and give it an API key.</p>
+
+      <div class="card">
+        <h2>Endpoint</h2>
+        <div class="copy-row">
+          <select id="connect-url" aria-label="Gateway address"></select>
+          <button class="btn btn-sm" type="button" data-copy="#connect-url">Copy</button>
+        </div>
+        <p class="hint">OpenAI-compatible: <code>/v1/chat/completions</code>, <code>/v1/completions</code>, <code>/v1/embeddings</code>, <code>/v1/models</code>. Model names are the ones on the Models page, e.g. <code id="connect-example-model">qwen2.5:7b</code>.</p>
+      </div>
+
+      <div class="card">
+        <h2>API keys</h2>
+        <div id="key-reveal" class="key-reveal" hidden>
+          <strong>Copy this key now. It won't be shown again.</strong>
+          <div class="copy-row"><code id="key-secret" class="secret"></code><button class="btn btn-sm btn-primary" type="button" data-copy="#key-secret">Copy</button></div>
+        </div>
+        <div id="keys-list"></div>
+        <form id="key-form" class="key-form">
+          <label class="field"><span>Name</span><input id="key-name" required maxlength="80" placeholder="e.g. laptop, open-webui, ci"></label>
+          <label class="field"><span>Requests per minute</span><input id="key-rpm" type="number" min="0" value="0"><small class="muted">0 = no limit</small></label>
+          <fieldset class="field"><legend>Models</legend>
+            <label class="check"><input type="checkbox" id="key-all" checked> All models, including ones installed later</label>
+            <div id="key-models" class="key-models" hidden></div>
+          </fieldset>
+          <p id="key-error" class="error" role="alert" hidden></p>
+          <button class="btn btn-primary" type="submit">Create key</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Use it from…</h2>
+        <div class="filters" id="snippet-tabs" role="tablist"></div>
+        <pre id="snippet" class="snippet"></pre>
+        <div class="copy-row"><span id="snippet-note" class="hint"></span><button class="btn btn-sm" type="button" data-copy="#snippet">Copy</button></div>
+      </div>
     </section>
 
     <!-- Settings -->

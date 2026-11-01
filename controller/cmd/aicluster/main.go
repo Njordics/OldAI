@@ -35,6 +35,10 @@ commands:
   release <id> [--keep-models]     release a node back to unadopted
   settings                         show settings
   settings set adoption_mode=auto|approve
+  keys [ls]                        list API keys for the gateway
+  keys create <name> [--models a,b] [--rpm N]
+                                   create a key (the secret is printed once)
+  keys rm <name|id>                revoke a key
 
 <id> may be any unique prefix of a node ID, or a node name.
 
@@ -108,6 +112,8 @@ func main() {
 		id := positional(fs, args[1:], "release <id> [--keep-models]")
 		must(c.do(ctx, http.MethodPost, "/api/v1/nodes/"+c.resolve(ctx, id)+"/release", map[string]bool{"keep_models": *keep}, nil))
 		fmt.Println("released")
+	case "keys":
+		keysCmd(ctx, c, args[1:], *asJSON)
 	case "settings":
 		var s web.Settings
 		if len(args) >= 3 && args[1] == "set" {

@@ -22,14 +22,20 @@ import (
 type Fake struct {
 	Dir         string
 	BytesPerSec int64 // slow pulls down so progress is visible (0 = unlimited)
+	// Label names the node in canned replies; TokenDelay paces streaming.
+	Label      string
+	TokenDelay time.Duration
 
 	mu     sync.Mutex
 	loaded map[string]bool
+	url    string
 }
 
 func NewFake(dir string) *Fake {
 	_ = os.MkdirAll(filepath.Join(dir, "blobs"), 0o755)
-	return &Fake{Dir: dir, loaded: map[string]bool{}}
+	f := &Fake{Dir: dir, loaded: map[string]bool{}, Label: "this node", TokenDelay: 25 * time.Millisecond}
+	f.startServer()
+	return f
 }
 
 func (f *Fake) Kind() string                    { return "fake" }

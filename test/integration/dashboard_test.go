@@ -42,7 +42,7 @@ func TestDashboardSession(t *testing.T) {
 	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") {
 		t.Fatalf("CSP = %q", csp)
 	}
-	for _, asset := range []string{"/ui/app.js", "/ui/app.css", "/ui/models.js"} {
+	for _, asset := range []string{"/ui/app.js", "/ui/app.css", "/ui/models.js", "/ui/chat.js", "/ui/connect.js"} {
 		if r := req("GET", asset, ""); r.StatusCode != 200 {
 			t.Fatalf("%s: %d", asset, r.StatusCode)
 		}

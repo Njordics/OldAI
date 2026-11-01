@@ -8,10 +8,11 @@ const $ = (sel, root = document) => root.querySelector(sel);
 // Extension points for the other dashboard scripts (models.js).
 const hooks = {
   refresh: [], // async () => void, run on every poll
+  route: [],   // (view) => void, when the visible tab changes
   drawer: [],  // (node) => html, extra sections in the node drawer
   wire: [],    // () => void, once at startup
 };
-const VIEWS = ["nodes", "models", "settings"];
+const VIEWS = ["nodes", "models", "chat", "connect", "settings"];
 
 const state = {
   nodes: [],
@@ -531,6 +532,7 @@ function route() {
     if (a.dataset.tab === known) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
+  for (const f of hooks.route) f(known);
 }
 
 async function loadTrustInfo() {

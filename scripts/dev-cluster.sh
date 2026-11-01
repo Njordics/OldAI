@@ -56,7 +56,7 @@ fi
 "$BIN/aiclusterd$EXE" \
   --data-dir "$DEV/controller" \
   --nodeapi-listen 127.0.0.1:7443 --advertise https://127.0.0.1:7443 \
-  --mgmt-listen 127.0.0.1:8090 \
+  --mgmt-listen 127.0.0.1:8090 --gateway-listen 127.0.0.1:8080 \
   --beacon-listen 127.0.0.1:47810 --beacon-targets 127.0.0.1:47811 \
   --provisioner tcp:127.0.0.1:7460 --registry-upstream "$REGISTRY" \
   --mdns=false --adoption-mode "$MODE" &
@@ -70,12 +70,14 @@ agent() { # name port shim-port extra-flags...
     --beacon-targets 127.0.0.1:47810 --controller-beacon-listen "" \
     --pairing-code-file "$DEV/$name/pairing-code" \
     --hw-fingerprint "dev-$name" \
-    --runtime fake --fake-mbps "$FAKE_MBPS" \
+    --runtime fake --fake-mbps "$FAKE_MBPS" --fake-label "$name" \
     --mdns=false "$@" &
   pids+=($!)
 }
 agent slave-1 7451 7453
 agent slave-2 7452 7454 --pairing
 
-echo "dev cluster running (mode=$MODE, models=$UPSTREAM); dashboard https://localhost:8090; Ctrl-C to stop"
+echo "dev cluster running (mode=$MODE, models=$UPSTREAM)"
+echo "  dashboard  https://localhost:8090"
+echo "  API        http://localhost:8080/v1  (create a key under Connect)"
 wait

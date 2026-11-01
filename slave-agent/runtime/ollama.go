@@ -27,6 +27,9 @@ func NewOllama(url string) *Ollama {
 
 func (o *Ollama) Kind() string { return "ollama" }
 
+// InferenceURL: Ollama serves the OpenAI API under /v1 itself.
+func (o *Ollama) InferenceURL() string { return o.URL }
+
 func (o *Ollama) call(ctx context.Context, method, path string, in, out any, timeout time.Duration) error {
 	if timeout > 0 {
 		var cancel context.CancelFunc

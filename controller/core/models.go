@@ -480,6 +480,46 @@ func (c *Core) CatalogFit(ctx context.Context) (*provision.FitResponse, error) {
 	return c.Prov.Fit(ctx, req)
 }
 
+// Replica is one node able to serve a model right now.
+type Replica struct {
+	ModelID   string
+	NodeID    string
+	NodeName  string
+	BaseURL   string // agent address
+	LocalName string // the runtime's name for the model
+	Loaded    bool   // in memory; otherwise on disk and loaded on first use
+	Slots     int    // concurrent requests the node's runtime serves
+}
+
+// Replicas lists, per model, the online nodes that hold it.
+func (c *Core) Replicas(ctx context.Context) (map[string][]Replica, error) {
+	nodes, err := c.Store.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]Replica{}
+	for _, n := range nodes {
+		if n.State != store.StateAdopted {
+			continue
+		}
+		slots := 4
+		var h proto.Health
+		if json.Unmarshal(n.Health, &h) == nil && h.Inference.Slots > 0 {
+			slots = h.Inference.Slots
+		}
+		for _, m := range observedModels(n) {
+			if m.LocalName == "" || (m.State != proto.ModelLoaded && m.State != proto.ModelInstalled) {
+				continue
+			}
+			out[m.ModelID] = append(out[m.ModelID], Replica{
+				ModelID: m.ModelID, NodeID: n.NodeID, NodeName: n.Name, BaseURL: nodeBase(n),
+				LocalName: m.LocalName, Loaded: m.State == proto.ModelLoaded, Slots: slots,
+			})
+		}
+	}
+	return out, nil
+}
+
 // SwapOptions says which catalog models would fit on the assignment's node
 // if that assignment's model were removed.
 func (c *Core) SwapOptions(ctx context.Context, assignmentID string) ([]provision.FitResult, error) {

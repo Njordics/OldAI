@@ -37,6 +37,7 @@ func (a *Agent) routes() http.Handler {
 	mux.Handle("GET /v1/observed-state", a.controllerOnly(a.handleObserved))
 	mux.Handle("POST /v1/ops/release", a.controllerOnly(a.handleRelease))
 	mux.Handle("GET /v1/jobs/{id}", a.controllerOnly(a.handleJob))
+	mux.Handle("/v1/infer/", a.controllerOnly(a.handleInfer))
 	return mux
 }
 

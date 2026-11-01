@@ -32,4 +32,7 @@ type Runtime interface {
 	Load(ctx context.Context, m Model) error
 	Unload(ctx context.Context, m Model) error
 	Remove(ctx context.Context, m Model) error
+	// InferenceURL is the loopback base URL of the runtime's
+	// OpenAI-compatible API (it serves /v1/chat/completions etc.).
+	InferenceURL() string
 }

@@ -102,6 +102,7 @@ type slaveOpt func(*agent.Config)
 func withPairing(c *agent.Config)     { c.Pairing = true }
 func withHW(fp string) slaveOpt       { return func(c *agent.Config) { c.HWFingerprint = fp } }
 func withDataDir(dir string) slaveOpt { return func(c *agent.Config) { c.DataDir = dir } }
+func withSlots(n int) slaveOpt        { return func(c *agent.Config) { c.InferenceSlots = n } }
 
 func startSlave(t *testing.T, c *ctrl, opts ...slaveOpt) *slave {
 	t.Helper()
@@ -119,6 +120,7 @@ func startSlave(t *testing.T, c *ctrl, opts ...slaveOpt) *slave {
 		Runtime:              "fake",
 		RegistryShimListen:   "127.0.0.1:0",
 		ReconcileEvery:       300 * time.Millisecond,
+		FakeLabel:            "slave-" + filepath.Base(dir),
 	}
 	for _, o := range opts {
 		o(&cfg)
