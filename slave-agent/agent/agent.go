@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -62,6 +63,9 @@ type Config struct {
 	InferenceSlots int
 	// FakeLabel names this node in the fake runtime's replies.
 	FakeLabel string
+	// LlamaCppDir holds llama.cpp's rpc-server and llama-server, used for
+	// models split across nodes.
+	LlamaCppDir string
 }
 
 func (c *Config) defaults() {
@@ -128,6 +132,8 @@ type Agent struct {
 	stateC chan struct{} // nudges the announcer (state change)
 
 	rt         runtime.Runtime
+	poolRT     runtime.PoolRuntime
+	pools      poolState
 	infer      inferStats
 	reconcileC chan struct{}
 	shimLn     net.Listener
@@ -152,15 +158,22 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		return nil, err
 	}
 	a.loadManaged()
+	a.pools.entries = map[string]*poolEntry{}
 	switch cfg.Runtime {
 	case "ollama":
 		a.rt = runtime.NewOllama(cfg.OllamaURL)
+		dir := cfg.LlamaCppDir
+		if dir == "" {
+			dir = "/usr/lib/aicluster/llama.cpp"
+		}
+		a.poolRT = &runtime.LlamaCpp{Dir: dir, CacheDir: filepath.Join(cfg.ModelDir, "rpc-cache")}
 	case "fake":
 		f := runtime.NewFake(cfg.ModelDir)
 		f.BytesPerSec = cfg.FakeBytesPerSec
 		if f.Label = cfg.FakeLabel; f.Label == "" {
 			f.Label, _ = os.Hostname()
 		}
+		a.poolRT = &runtime.FakePool{Label: f.Label, TokenDelay: f.TokenDelay}
 		a.rt = f
 	case "none":
 	default:
@@ -290,13 +303,18 @@ func (a *Agent) serverTLS() *tls.Config {
 			a.mu.RLock()
 			defer a.mu.RUnlock()
 			if ad := a.adopted; ad != nil {
-				pool, want := ad.caPool, pki.ControllerURI(ad.ClusterID)
+				// The Controller, and other nodes of this cluster (pool
+				// tunnels). Each route then checks exactly who may call it.
+				pool, ctrl := ad.caPool, pki.ControllerURI(ad.ClusterID)
 				return &tls.Config{
 					MinVersion:   tls.VersionTLS13,
 					Certificates: []tls.Certificate{ad.cert},
 					ClientAuth:   tls.RequireAnyClientCert,
 					VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
-						_, err := pki.VerifyPeer(raw, pool, want, x509.ExtKeyUsageClientAuth)
+						leaf, err := pki.VerifyPeer(raw, pool, "", x509.ExtKeyUsageClientAuth)
+						if err == nil && !pki.HasURI(leaf, ctrl) && pki.NodeIDFromCert(leaf) == "" {
+							err = errors.New("peer is neither this cluster's controller nor one of its nodes")
+						}
 						return err
 					},
 				}, nil
@@ -311,6 +329,7 @@ func (a *Agent) serverTLS() *tls.Config {
 
 // release returns the node to the unadopted state (§5.5).
 func (a *Agent) release(reason string, newIdentity, keepModels bool) error {
+	a.stopAllPools()
 	if !keepModels {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		a.removeAllModels(ctx)

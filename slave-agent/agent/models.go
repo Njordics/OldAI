@@ -65,7 +65,7 @@ func toRuntimeModel(dm proto.DesiredModel, shimHost string) (runtime.Model, erro
 }
 
 func (a *Agent) modelLoop(ctx context.Context) {
-	if a.rt == nil {
+	if a.rt == nil && a.poolRT == nil {
 		return
 	}
 	t := time.NewTicker(a.cfg.ReconcileEvery)
@@ -122,12 +122,23 @@ func (a *Agent) stillDesired(assignmentID string) bool {
 }
 
 func (a *Agent) reconcileModels(ctx context.Context) {
-	desired, grace, adopted := a.desiredModels()
+	all, grace, adopted := a.desiredModels()
 	if !adopted {
 		return
 	}
+	a.reconcilePools(ctx, all)
+	// The rest handles models served by the local runtime (Ollama).
+	var desired []proto.DesiredModel
+	for _, dm := range all {
+		if dm.Role == "" {
+			desired = append(desired, dm)
+		}
+	}
 	shim := a.ShimHost()
 
+	if a.rt == nil {
+		return
+	}
 	if err := a.rt.Check(ctx); err != nil {
 		a.mu.Lock()
 		a.models.rtErr = err.Error()
@@ -259,7 +270,7 @@ func (a *Agent) reconcileModels(ctx context.Context) {
 	// 3. Forget progress for assignments that are gone.
 	a.mu.Lock()
 	keep := map[string]bool{}
-	for _, dm := range desired {
+	for _, dm := range all {
 		keep[dm.AssignmentID] = true
 	}
 	for id := range a.models.obs {

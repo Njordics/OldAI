@@ -90,9 +90,10 @@ function renderInstalled() {
     if (!groups.has(a.model_id)) groups.set(a.model_id, []);
     groups.get(a.model_id).push(a);
   }
-  const ready = ms.assignments.filter(a => a.state === "loaded" || (a.state === "installed" && a.residency === "on_demand")).length;
-  $("#models-summary").textContent = ms.assignments.length
-    ? `${groups.size} model${groups.size === 1 ? "" : "s"} · ${ready} of ${ms.assignments.length} copies ready`
+  const copies = copiesOf(ms.assignments);
+  const ready = copies.filter(c => c.every(a => a.state === "loaded" || (a.state === "installed" && a.residency === "on_demand"))).length;
+  $("#models-summary").textContent = copies.length
+    ? `${groups.size} model${groups.size === 1 ? "" : "s"} · ${ready} of ${copies.length} copies ready`
     : "";
 
   if (!groups.size) {
@@ -108,9 +109,47 @@ function renderInstalled() {
           <div class="muted">${esc(fam?.family || "")}${fam ? " · " + fam.capabilities.map(esc).join(", ") : ""}</div></div>
         <button class="btn btn-sm" data-act="install" data-id="${esc(modelId)}">Add to another node</button>
       </div>
-      <div class="placements">${as.map(placementRow).join("")}</div>
+      <div class="placements">${copiesOf(as).map(c => c.length > 1 || c[0].group_id ? poolRow(c) : placementRow(c[0])).join("")}</div>
     </div>`;
   }).join(""));
+}
+
+// copiesOf groups assignments into copies: a pooled copy is all members of
+// one group (leader first); every other assignment is a copy on its own.
+function copiesOf(as) {
+  const out = [], pools = new Map();
+  for (const a of as) {
+    if (!a.group_id) { out.push([a]); continue; }
+    if (!pools.has(a.group_id)) { pools.set(a.group_id, []); out.push(pools.get(a.group_id)); }
+    pools.get(a.group_id).push(a);
+  }
+  for (const c of out) c.sort((x, y) => (y.role === "leader") - (x.role === "leader") || y.share - x.share);
+  return out;
+}
+
+function poolRow(members) {
+  const leader = members.find(m => m.role === "leader") || members[0];
+  const failed = members.find(m => m.state === "failed");
+  let st;
+  if (failed) st = statusOf(failed);
+  else if (members.every(m => m.state === "loaded")) st = { cls: "s-adopted", label: "Ready" };
+  else if (["fetching", "downloading", "loading"].includes(leader.state)) st = statusOf(leader);
+  else if (members.some(m => m.state === "offline")) st = { cls: "s-offline", label: "A member node is offline" };
+  else st = { cls: "s-enrolling", label: "Starting workers" };
+  const who = members.map(m => `<strong>${esc(m.node_name || m.node_id.slice(0, 8))}</strong> <span class="muted">${m.role === "leader" ? "leader, " : ""}${Math.round(m.share * 100)}%</span>`).join(" + ");
+  const total = members.reduce((n, m) => n + m.need, 0);
+  const kinds = [...new Set(members.map(m => PLACEMENT[m.placement] || m.placement))].join(" / ");
+  return `<div class="placement pooled" data-id="pool-${esc(leader.group_id)}">
+    <div class="pl-node"><span class="pill plain pool-tag">Split across ${members.length} nodes</span>
+      <div class="pool-members">${who}</div>
+      <div class="muted">${esc(leader.quant)} · ${esc(kinds)} · ${bytes(total)} in total</div></div>
+    <div class="pl-state"><span class="pill ${st.cls}">${esc(st.label)}</span>
+      ${st.bar ? `<progress max="1" value="${(failed || leader).progress || 0}"></progress>` : ""}${st.detail || ""}</div>
+    <div class="pl-actions">
+      ${leader.state === "failed" && leader.stage === "controller" ? `<button class="btn btn-sm" data-act="retry" data-id="${esc(leader.id)}">Retry</button>` : ""}
+      <button class="btn btn-sm btn-ghost" data-act="unassign" data-id="${esc(leader.id)}">Remove</button>
+    </div>
+  </div>`;
 }
 
 function placementRow(a) {
@@ -162,7 +201,10 @@ function variantRow(v, nodes) {
   const best = fitting.map(n => fit[n.node_id]).sort((a, b) => ({ gpu: 0, hybrid: 1, cpu: 2 }[a.placement] - { gpu: 0, hybrid: 1, cpu: 2 }[b.placement]))[0];
   let summary;
   if (!nodes.length) summary = `<span class="muted">no nodes yet</span>`;
-  else if (!fitting.length) summary = `<span class="note bad" title="${esc(nodes.map(n => nodeName(n) + ": " + (fit[n.node_id]?.reason || "?")).join("\n"))}">Doesn't fit any node</span>`;
+  else if (!fitting.length && ms.catalog.pools?.[v.id]?.fits) {
+    const p = ms.catalog.pools[v.id];
+    summary = `<span>Too big for one node · <strong>fits split across ${p.members.length} nodes</strong></span>`;
+  } else if (!fitting.length) summary = `<span class="note bad" title="${esc(nodes.map(n => nodeName(n) + ": " + (fit[n.node_id]?.reason || "?")).join("\n"))}">Doesn't fit any node${nodes.length > 1 ? ", even split" : ""}</span>`;
   else summary = `Fits ${fitting.length} of ${nodes.length} node${nodes.length === 1 ? "" : "s"} · best: ${PLACEMENT[best.placement]}`;
   const smallest = Math.min(...v.quants.map(q => q.size));
   return `<div class="variant" data-id="v-${esc(v.id)}">
@@ -190,7 +232,11 @@ function openInstall(modelId, nodeId) {
     found.v.quants.map(q => `<option value="${esc(q.quant)}">${esc(q.quant)} · ${bytes(q.size)} download</option>`).join("");
   $("#install-replicas").value = 1;
   $("#install-resident").checked = true;
-  for (const r of document.querySelectorAll("input[name=where]")) r.checked = r.value === (nodeId ? "pick" : "auto");
+  const fitsAlone = servingNodes().some(n => ms.catalog?.fit?.[modelId]?.[n.node_id]?.fits);
+  const poolFits = !!ms.catalog?.pools?.[modelId]?.fits;
+  const where = nodeId ? "pick" : !fitsAlone && poolFits ? "pool" : "auto";
+  for (const r of document.querySelectorAll("input[name=where]")) r.checked = r.value === where;
+  $("#where-pool").hidden = servingNodes().length < 2;
   $("#install-error").hidden = true;
   $("#install-go").disabled = false;
   renderInstallNodes(nodeId ? [nodeId] : []);
@@ -200,10 +246,29 @@ function openInstall(modelId, nodeId) {
 function renderInstallNodes(preselect) {
   const { modelId } = ms.install;
   const quant = $("#install-quant").value;
-  const pick = document.querySelector("input[name=where]:checked").value === "pick";
+  const mode = document.querySelector("input[name=where]:checked").value;
+  const pick = mode === "pick";
   const checked = new Set(preselect || [...document.querySelectorAll("#install-nodes input:checked")].map(i => i.value));
   const fit = ms.catalog?.fit?.[modelId] || {};
+  const suggestion = ms.catalog?.pools?.[modelId];
+  const hint = $("#install-pool-hint");
+  hint.hidden = mode !== "pool";
+  if (mode === "pool") {
+    hint.innerHTML = suggestion?.fits
+      ? `Suggested split: ${suggestion.members.map(m => `<strong>${esc(nodeName(state.nodes.find(n => n.node_id === m.node_id) || { node_id: m.node_id }))}</strong> ${Math.round(m.share * 100)}%${m.leader ? " (leader)" : ""}`).join(" + ")} · ${esc(suggestion.quant)}. Tick nodes to choose your own.`
+      : "Tick at least two nodes. The model is split in proportion to each node's free memory.";
+  }
   const rows = servingNodes().map(n => {
+    if (mode === "pool") {
+      const has = ms.assignments.some(a => a.node_id === n.node_id && a.model_id === modelId);
+      const sug = suggestion?.members?.find(m => m.node_id === n.node_id);
+      const ok = !has && n.state === "adopted";
+      return `<label class="node-pick ${ok ? "" : "disabled"}">
+        <input type="checkbox" value="${esc(n.node_id)}" ${ok ? "" : "disabled"} ${ok && checked.has(n.node_id) ? "checked" : ""}>
+        <span class="np-name"><strong>${esc(nodeName(n))}</strong>${n.state === "offline" ? ` <span class="pill s-offline">offline</span>` : ""}</span>
+        <span class="np-fit">${has ? `<span class="muted">already has this model</span>` : sug ? `suggested: ${Math.round(sug.share * 100)}% of the layers` : `<span class="muted">${hwLabel(n.hw_summary)}</span>`}</span>
+      </label>`;
+    }
     let f = fit[n.node_id];
     if (f && quant) {
       const o = f.options.find(o => o.quant === quant);
@@ -218,7 +283,7 @@ function renderInstallNodes(preselect) {
     </label>`;
   });
   const box = $("#install-nodes");
-  box.classList.toggle("picking", pick);
+  box.classList.toggle("picking", pick || mode === "pool");
   box.innerHTML = rows.join("") || `<p class="muted">No adopted nodes.</p>`;
 }
 
@@ -226,13 +291,23 @@ async function submitInstall() {
   const btn = $("#install-go");
   const err = $("#install-error");
   err.hidden = true;
-  const pick = document.querySelector("input[name=where]:checked").value === "pick";
+  const mode = document.querySelector("input[name=where]:checked").value;
+  const pick = mode === "pick";
   const body = {
     model_id: ms.install.modelId,
     quant: $("#install-quant").value,
     residency: $("#install-resident").checked ? "resident" : "on_demand",
   };
-  if (pick) {
+  if (mode === "pool") {
+    body.pool = true;
+    const nodes = [...document.querySelectorAll("#install-nodes input:checked")].map(i => i.value);
+    if (nodes.length === 1) {
+      err.textContent = "Tick at least two nodes, or none to let the Controller choose.";
+      err.hidden = false;
+      return;
+    }
+    if (nodes.length) body.nodes = nodes;
+  } else if (pick) {
     body.nodes = [...document.querySelectorAll("#install-nodes input:checked")].map(i => i.value);
     if (!body.nodes.length) {
       err.textContent = "Tick at least one node.";
@@ -247,7 +322,7 @@ async function submitInstall() {
     const out = await api("POST", "/api/v1/models/install", body);
     $("#install-dialog").close();
     const names = out.map(a => nodeName(state.nodes.find(n => n.node_id === a.node_id) || { node_id: a.node_id })).join(", ");
-    toast(`Installing ${body.model_id} on ${names}`);
+    toast(body.pool ? `Splitting ${body.model_id} across ${names}` : `Installing ${body.model_id} on ${names}`);
     ms.catalogAt = 0;
     refresh();
   } catch (e) {
@@ -343,10 +418,14 @@ async function submitPicker() {
 async function unassign(id) {
   const a = ms.assignments.find(x => x.id === id);
   if (!a) return;
-  if (!confirm(`Remove ${a.model_id} from ${a.node_name}? It is unloaded now and deleted from the node's disk after a day.`)) return;
+  const members = a.group_id ? ms.assignments.filter(x => x.group_id === a.group_id) : [a];
+  const msg = a.group_id
+    ? `Remove the copy of ${a.model_id} split across ${members.map(m => m.node_name).join(", ")}? It stops on all of them.`
+    : `Remove ${a.model_id} from ${a.node_name}? It is unloaded now and deleted from the node's disk after a day.`;
+  if (!confirm(msg)) return;
   try {
     await api("DELETE", `/api/v1/assignments/${encodeURIComponent(id)}`);
-    toast(`Removed ${a.model_id} from ${a.node_name}`);
+    toast(a.group_id ? `Removed the split copy of ${a.model_id}` : `Removed ${a.model_id} from ${a.node_name}`);
     ms.catalogAt = 0;
     refresh();
   } catch (e) {
@@ -375,9 +454,9 @@ function drawerModels(n) {
     ${as.length ? `<div class="placements compact">${as.map(a => {
       const st = statusOf(a);
       return `<div class="placement" data-id="${esc(a.id)}">
-        <div class="pl-node"><strong>${esc(a.model_id)}</strong><div class="muted">${esc(a.quant)} · ${PLACEMENT[a.placement] || ""}</div></div>
+        <div class="pl-node"><strong>${esc(a.model_id)}</strong><div class="muted">${esc(a.quant)} · ${PLACEMENT[a.placement] || ""}${a.group_id ? ` · split: ${a.role === "leader" ? "leader" : "worker"}, ${Math.round(a.share * 100)}% of layers` : ""}</div></div>
         <div class="pl-state"><span class="pill ${st.cls}">${esc(st.label)}</span>${st.bar ? `<progress max="1" value="${a.progress || 0}"></progress>` : ""}</div>
-        <div class="pl-actions"><button class="btn btn-sm" data-act="swap" data-id="${esc(a.id)}">Swap…</button>
+        <div class="pl-actions">${a.group_id ? "" : `<button class="btn btn-sm" data-act="swap" data-id="${esc(a.id)}">Swap…</button>`}
           <button class="btn btn-sm btn-ghost" data-act="unassign" data-id="${esc(a.id)}">Remove</button></div>
       </div>`;
     }).join("")}</div>` : `<p class="muted">No models on this node.</p>`}

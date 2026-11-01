@@ -85,6 +85,40 @@ type FitRequest struct {
 	Models  []string  `json:"models,omitempty"`
 	Quant   string    `json:"quant,omitempty"`
 	Exclude []string  `json:"exclude,omitempty"`
+	// Pool asks for pooled-placement suggestions for models no single
+	// node can hold.
+	Pool     bool `json:"pool,omitempty"`
+	MaxNodes int  `json:"max_nodes,omitempty"`
+}
+
+type PoolMember struct {
+	NodeID    string  `json:"node_id"`
+	Share     float64 `json:"share"`
+	VRAM      int64   `json:"vram"`
+	RAM       int64   `json:"ram"`
+	Placement string  `json:"placement"`
+	Leader    bool    `json:"leader"`
+}
+
+type PoolResult struct {
+	ModelID string       `json:"model_id"`
+	Fits    bool         `json:"fits"`
+	Pooled  bool         `json:"pooled"`
+	Quant   string       `json:"quant,omitempty"`
+	Runtime string       `json:"runtime,omitempty"`
+	Ref     string       `json:"ref,omitempty"`
+	Size    int64        `json:"size,omitempty"`
+	Need    int64        `json:"need,omitempty"`
+	Members []PoolMember `json:"members"`
+	Reason  string       `json:"reason"`
+}
+
+type PoolRequest struct {
+	Model    string    `json:"model"`
+	Nodes    []FitNode `json:"nodes"`
+	Quant    string    `json:"quant,omitempty"`
+	Explicit bool      `json:"explicit,omitempty"`
+	MaxNodes int       `json:"max_nodes,omitempty"`
 }
 
 type FitOption struct {
@@ -117,8 +151,9 @@ type FitResult struct {
 }
 
 type FitResponse struct {
-	CatalogVersion string      `json:"catalog_version"`
-	Results        []FitResult `json:"results"`
+	CatalogVersion string       `json:"catalog_version"`
+	Results        []FitResult  `json:"results"`
+	Pools          []PoolResult `json:"pools,omitempty"`
 }
 
 type Client struct {
@@ -177,4 +212,15 @@ func (c *Client) Fit(ctx context.Context, req FitRequest) (*FitResponse, error) 
 		return nil, fmt.Errorf("provisioner: %w", err)
 	}
 	return &resp, nil
+}
+
+// Pool plans one copy of a model split across nodes.
+func (c *Client) Pool(ctx context.Context, req PoolRequest) (*PoolResult, error) {
+	var resp struct {
+		Result PoolResult `json:"result"`
+	}
+	if err := httpx.Do(ctx, c.http, http.MethodPost, c.base+"/pool", req, &resp); err != nil {
+		return nil, fmt.Errorf("provisioner: %w", err)
+	}
+	return &resp.Result, nil
 }

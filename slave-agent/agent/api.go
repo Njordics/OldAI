@@ -38,6 +38,7 @@ func (a *Agent) routes() http.Handler {
 	mux.Handle("POST /v1/ops/release", a.controllerOnly(a.handleRelease))
 	mux.Handle("GET /v1/jobs/{id}", a.controllerOnly(a.handleJob))
 	mux.Handle("/v1/infer/", a.controllerOnly(a.handleInfer))
+	mux.HandleFunc("GET /v1/rpc-tunnel/{group}", a.handleRPCTunnel)
 	return mux
 }
 

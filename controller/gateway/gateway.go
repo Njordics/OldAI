@@ -27,12 +27,11 @@ import (
 )
 
 const (
-	maxBody         = 32 << 20
-	suspectFor      = 10 * time.Second
-	snapshotTTL     = time.Second
-	touchEvery      = time.Minute
-	headerTimeout   = 10 * time.Minute // first token can wait for a model to load
-	inferPathPrefix = "/v1/infer/ollama"
+	maxBody       = 32 << 20
+	suspectFor    = 10 * time.Second
+	snapshotTTL   = time.Second
+	touchEvery    = time.Minute
+	headerTimeout = 10 * time.Minute // first token can wait for a model to load
 )
 
 type Config struct {
@@ -235,6 +234,9 @@ type ModelInfo struct {
 		Loaded       int      `json:"loaded"`
 		Nodes        []string `json:"nodes"`
 		Capabilities []string `json:"capabilities"`
+		// Pooled copies are split across several nodes; Nodes lists their
+		// leaders.
+		Pooled int `json:"pooled"`
 	} `json:"aicluster"`
 }
 
@@ -255,6 +257,9 @@ func (g *Gateway) Models(ctx context.Context, p *Principal) ([]ModelInfo, error)
 			mi.AICluster.Nodes = append(mi.AICluster.Nodes, r.NodeName)
 			if r.Loaded {
 				mi.AICluster.Loaded++
+			}
+			if len(r.Pool) > 0 {
+				mi.AICluster.Pooled++
 			}
 		}
 		mi.AICluster.Capabilities = s.caps[id]
@@ -456,7 +461,7 @@ func (g *Gateway) Infer(w http.ResponseWriter, r *http.Request, p *Principal, pa
 }
 
 func (g *Gateway) forward(ctx context.Context, rep *core.Replica, path string, body []byte) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rep.BaseURL+inferPathPrefix+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rep.BaseURL+"/v1/infer/"+inferRoute(rep)+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -513,4 +518,13 @@ func (g *Gateway) respond(w http.ResponseWriter, resp *http.Response, rep *core.
 			return
 		}
 	}
+}
+
+// inferRoute is the agent route for a replica: the local Ollama, or the
+// llama-server of a pooled model the node leads.
+func inferRoute(rep *core.Replica) string {
+	if rep.Route != "" {
+		return rep.Route
+	}
+	return "ollama"
 }

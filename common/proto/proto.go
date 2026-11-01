@@ -197,6 +197,32 @@ type DesiredModel struct {
 	Residency    string      `json:"residency"` // resident | on_demand
 	Ctx          int         `json:"ctx,omitempty"`
 	Size         int64       `json:"size,omitempty"`
+	// Role and Pool are set for a model split across nodes: the leader
+	// loads the file and serves; workers run llama.cpp's rpc-server and
+	// accept connections only from the leader, through the agents' mTLS.
+	Role string    `json:"role,omitempty"` // "" | leader | worker
+	Pool *PoolSpec `json:"pool,omitempty"`
+}
+
+// Pool roles in DesiredModel.Role / ObservedModel.Role.
+const (
+	RoleLeaderName = "leader"
+	RoleWorkerName = "worker"
+)
+
+type PoolSpec struct {
+	GroupID  string       `json:"group_id"`
+	Leader   string       `json:"leader"` // node_id
+	Members  []PoolMember `json:"members"`
+	Layers   int          `json:"layers,omitempty"` // total layers, when known
+	Parallel int          `json:"parallel,omitempty"`
+}
+
+type PoolMember struct {
+	NodeID   string  `json:"node_id"`
+	Endpoint string  `json:"endpoint"` // agent base URL, e.g. https://10.0.0.5:7450
+	Share    float64 `json:"share"`    // fraction of the layers
+	Leader   bool    `json:"leader,omitempty"`
 }
 
 type ModelSource struct {
@@ -229,6 +255,7 @@ type ObservedModel struct {
 	Runtime      string  `json:"runtime"`
 	LocalName    string  `json:"local_name,omitempty"` // the runtime's name for it
 	State        string  `json:"state"`
+	Role         string  `json:"role,omitempty"`
 	Progress     float64 `json:"progress"`
 	BytesDone    int64   `json:"bytes_done"`
 	BytesTotal   int64   `json:"bytes_total"`

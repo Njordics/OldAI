@@ -301,6 +301,10 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 99px; }
 .v-fit { grid-column: 1; font-size: 12.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .variant .btn { grid-column: 2; grid-row: 1 / span 2; }
 
+.placement.pooled { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
+.pool-tag { font-size: 11px; margin-bottom: 4px; background: var(--accent-soft); color: var(--accent); }
+.pool-members { margin: 2px 0; }
+
 /* Install / swap dialogs */
 .dialog-wide { width: min(560px, calc(100vw - 32px)); }
 select {

@@ -119,9 +119,25 @@ def fit(catalog: Catalog, req: dict) -> dict:
         raise KeyError(f"unknown models: {', '.join(unknown)}")
     quant = req.get("quant")
     exclude = set(req.get("exclude") or [])
-    results = [
-        fit_variant(variants[m], node, quant=quant, exclude=exclude)
-        for m in wanted
-        for node in (req.get("nodes") or [])
-    ]
-    return {"catalog_version": catalog.version, "results": results}
+    nodes = req.get("nodes") or []
+    results = [fit_variant(variants[m], node, quant=quant, exclude=exclude) for m in wanted for node in nodes]
+    out = {"catalog_version": catalog.version, "results": results}
+    if req.get("pool") and len(nodes) >= 2:
+        # Suggest a pool only for models no single node can hold.
+        from .pool import pool_variant
+        fits_alone = {r["model_id"] for r in results if r["fits"]}
+        out["pools"] = [pool_variant(variants[m], nodes, quant=quant, exclude=exclude, max_nodes=int(req.get("max_nodes") or 4))
+                        for m in wanted if m not in fits_alone]
+    return out
+
+
+def pool(catalog: Catalog, req: dict) -> dict:
+    """POST /pool: plan one pooled copy of req["model"] over req["nodes"]."""
+    from .pool import pool_variant
+    variants = catalog.variants()
+    model = req.get("model")
+    if model not in variants:
+        raise KeyError(f"unknown models: {model}")
+    return {"catalog_version": catalog.version, "result": pool_variant(
+        variants[model], req.get("nodes") or [], quant=req.get("quant"), exclude=set(req.get("exclude") or []),
+        max_nodes=int(req.get("max_nodes") or 4), explicit=bool(req.get("explicit")))}

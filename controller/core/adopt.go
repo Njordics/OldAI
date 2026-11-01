@@ -339,6 +339,15 @@ func (c *Core) Release(ctx context.Context, nodeID string, keepModels bool) erro
 	if err := c.Store.Revoke(ctx, n.CertSerial, nodeID); err != nil {
 		return err
 	}
+	groups, err := c.Store.GroupsOfNode(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	for _, g := range groups {
+		if err := c.removePool(ctx, g); err != nil {
+			return err
+		}
+	}
 	if err := c.Store.DeleteNodeAssignments(ctx, nodeID); err != nil {
 		return err
 	}

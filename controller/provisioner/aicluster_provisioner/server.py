@@ -58,7 +58,8 @@ class Handler(BaseHTTPRequestHandler):
         self._error(404, "not_found", self.path)
 
     def do_POST(self):
-        if self.path != "/fit":
+        handler = {"/fit": fitmod.fit, "/pool": fitmod.pool}.get(self.path)
+        if handler is None:
             return self._error(404, "not_found", self.path)
         n = int(self.headers.get("Content-Length") or 0)
         if n > MAX_BODY:
@@ -68,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             return self._error(400, "bad_request", str(e))
         try:
-            return self._send(200, fitmod.fit(self.store.get(), req))
+            return self._send(200, handler(self.store.get(), req))
         except KeyError as e:
             return self._error(404, "unknown_model", str(e.args[0]))
         except Exception as e:  # noqa: BLE001

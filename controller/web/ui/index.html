@@ -365,8 +365,12 @@
           <span class="choice-body"><strong>Best node automatically</strong><span>Picks the node with the most room. <label class="inline">Copies <input id="install-replicas" type="number" min="1" max="64" value="1"></label></span></span>
         </label>
         <label class="choice choice-sm"><input type="radio" name="where" value="pick">
-          <span class="choice-body"><strong>Choose nodes</strong><span>Install on each node you tick.</span></span>
+          <span class="choice-body"><strong>Choose nodes</strong><span>Install a full copy on each node you tick.</span></span>
         </label>
+        <label class="choice choice-sm" id="where-pool"><input type="radio" name="where" value="pool">
+          <span class="choice-body"><strong>Split one copy across nodes</strong><span>For models too big for one node. Tick the nodes to use, or none to let the Controller choose. Slower than a single node, and every member must stay online.</span></span>
+        </label>
+        <p id="install-pool-hint" class="hint" hidden></p>
       </fieldset>
       <div id="install-nodes" class="node-picks"></div>
       <label class="check"><input type="checkbox" id="install-resident" checked> Keep loaded in memory (fast first answer; uses its memory all the time)</label>

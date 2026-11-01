@@ -23,12 +23,19 @@ async function loadChatModels(force) {
   renderChatModels();
 }
 
+// copiesLabel: "2 nodes", or "split across nodes" for a pooled copy.
+function copiesLabel(c) {
+  if (c.pooled && c.pooled === c.replicas) return c.pooled === 1 ? "split across nodes" : `${c.pooled} split copies`;
+  if (c.pooled) return `${c.replicas} copies (${c.pooled} split)`;
+  return `${c.replicas} node${c.replicas === 1 ? "" : "s"}`;
+}
+
 function renderChatModels() {
   const sel = $("#chat-model");
   const prev = sel.value;
   const usable = chat.models.filter(isChatModel);
   sel.innerHTML = usable.length
-    ? usable.map(m => `<option value="${esc(m.id)}">${esc(m.id)} · ${m.aicluster.replicas} node${m.aicluster.replicas === 1 ? "" : "s"}</option>`).join("")
+    ? usable.map(m => `<option value="${esc(m.id)}">${esc(m.id)} · ${copiesLabel(m.aicluster)}</option>`).join("")
     : `<option value="">No chat models ready</option>`;
   if (usable.some(m => m.id === prev)) sel.value = prev;
   sel.disabled = !usable.length;

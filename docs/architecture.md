@@ -250,6 +250,17 @@ go.mod          one Go module ("aicluster") for all Go code
 Makefile        controller-iso, slave-iso, test, e2e
 ```
 
-## 12. Out of scope for v1
+## 12. Pooled models (one copy split across nodes)
 
-Controller HA; multi-subnet discovery (manual `aicluster nodes add <ip>` covers it); multi-node tensor parallelism across Slaves; fine-tuning; per-user quotas beyond per-key rate limits.
+For models no single node can hold, one copy can be split across several nodes with llama.cpp's RPC mode (pipeline-style layer split; not tensor parallelism).
+
+- **Placement** (provisioner `/pool`): automatic picks the fewest nodes, GPU memory first, then GPU + RAM, at the best quantisation that fits within 4 members; when the admin picks the nodes, every one takes part in proportion to its free memory. The member with the largest share that has disk room for the file becomes the leader.
+- **Records:** each member is an assignment row sharing a `group_id`, with `role` (leader/worker) and `share`; fit accounting, status and removal work per node. Removing any member, or releasing a member's node, removes the whole pool. Pools can't be swapped.
+- **Workers** run `rpc-server` on loopback; it is reachable only through `GET /v1/rpc-tunnel/<group>` on the agent, which accepts an mTLS client certificate for exactly that pool's leader node and then becomes a raw byte stream (HTTP Upgrade). `rpc-server` itself has no authentication, so it never listens on the LAN.
+- **Leader** downloads the GGUF (the Ollama model layer) from the Controller cache, opens a loopback tunnel listener per worker, and starts `llama-server --rpc <tunnels> --tensor-split <shares>` in the device order llama.cpp reports. It probes each worker every reconcile; an unreachable worker marks the pool failed, and a worker whose `rpc-server` restarted (new epoch) makes the leader reload.
+- **Serving:** the gateway offers a pooled model only while its leader and every worker report loaded and are online, and sends requests to the leader's agent route `llamacpp:<assignment>`.
+- **Trade-offs:** slower than one machine (every token crosses every member; 10 Gb+ networking helps), and the model is down whenever any member is.
+
+## 13. Out of scope for v1
+
+Controller HA; multi-subnet discovery (manual `aicluster nodes add <ip>` covers it); tensor parallelism across Slaves (vLLM + Ray); fine-tuning; per-user quotas beyond per-key rate limits.

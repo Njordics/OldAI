@@ -123,6 +123,10 @@ var migrations = []string{
 		last_used_at INTEGER NOT NULL DEFAULT 0
 	)`,
 	`CREATE TABLE workspace_files (path TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
+	`ALTER TABLE assignments ADD COLUMN group_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE assignments ADD COLUMN role TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE assignments ADD COLUMN share REAL NOT NULL DEFAULT 0`,
+	`CREATE INDEX assignments_group ON assignments(group_id)`,
 }
 
 func Open(path string) (*Store, error) {

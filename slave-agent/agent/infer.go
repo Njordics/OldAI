@@ -21,12 +21,20 @@ type inferStats struct {
 }
 
 func (a *Agent) handleInfer(w http.ResponseWriter, r *http.Request) {
-	if a.rt == nil || a.rt.InferenceURL() == "" {
-		http.Error(w, `{"error":{"message":"no inference runtime on this node","type":"server_error"}}`, http.StatusServiceUnavailable)
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/infer/")
+	route, path, ok := strings.Cut(rest, "/")
+	// "ollama" goes to the local Ollama; "llamacpp:<assignment>" to the
+	// llama-server of a pooled model this node leads.
+	base := ""
+	if id, pooled := strings.CutPrefix(route, "llamacpp:"); pooled {
+		base = a.poolURL(id)
+	} else if a.rt != nil {
+		base = a.rt.InferenceURL()
+	}
+	if base == "" {
+		http.Error(w, `{"error":{"message":"model not served on this node","type":"server_error"}}`, http.StatusServiceUnavailable)
 		return
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/v1/infer/")
-	_, path, ok := strings.Cut(rest, "/") // drop the runtime segment
 	path = "/" + path
 	allowed := false
 	for _, p := range inferPaths {
@@ -36,7 +44,7 @@ func (a *Agent) handleInfer(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	target, err := url.Parse(a.rt.InferenceURL())
+	target, err := url.Parse(base)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

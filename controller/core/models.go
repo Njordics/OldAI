@@ -29,7 +29,12 @@ var (
 	ErrNoNodeFits   = errors.New("no node has room for this model")
 	ErrNotAdopted   = errors.New("node is not adopted")
 	ErrAlreadyThere = errors.New("model is already on this node")
+	ErrNoPoolNeeded = errors.New("this model fits on one node; install it without splitting")
+	ErrPooledSwap   = errors.New("a model split across nodes can't be swapped; remove it and install another")
 )
+
+// PoolParallel is how many requests a pooled model serves at once.
+const PoolParallel = 2
 
 // FitError lists why a model can't go on the requested nodes.
 type FitError struct {
@@ -51,6 +56,9 @@ type InstallRequest struct {
 	Nodes     []string `json:"nodes,omitempty"`     // empty = pick automatically
 	Replicas  int      `json:"replicas,omitempty"`  // with automatic placement; default 1
 	Residency string   `json:"residency,omitempty"` // resident (default) | on_demand
+	// Pool splits one copy across nodes (llama.cpp RPC). With Nodes, the
+	// pool uses those nodes; without, the provisioner picks the fewest.
+	Pool bool `json:"pool,omitempty"`
 }
 
 func servesModels(n *store.Node) bool {
@@ -135,6 +143,10 @@ func (c *Core) Install(ctx context.Context, req InstallRequest) ([]*store.Assign
 	}
 	has := func(nodeID string) bool {
 		return slices.ContainsFunc(byNode[nodeID], func(a *store.Assignment) bool { return a.ModelID == req.ModelID })
+	}
+
+	if req.Pool {
+		return c.installPool(ctx, req, nodes, byNode, has)
 	}
 
 	explicit := len(req.Nodes) > 0
@@ -229,6 +241,9 @@ func (c *Core) Swap(ctx context.Context, assignmentID, modelID, quant string) (*
 	if err != nil {
 		return nil, err
 	}
+	if old.GroupID != "" {
+		return nil, ErrPooledSwap
+	}
 	n, err := c.Store.GetNode(ctx, old.NodeID)
 	if err != nil {
 		return nil, err
@@ -275,6 +290,9 @@ func (c *Core) RemoveAssignment(ctx context.Context, id string) error {
 	a, err := c.Store.GetAssignment(ctx, id)
 	if err != nil {
 		return err
+	}
+	if a.GroupID != "" {
+		return c.removePool(ctx, a.GroupID)
 	}
 	if err := c.Store.DeleteAssignment(ctx, id); err != nil {
 		return err
@@ -342,6 +360,12 @@ func (c *Core) SyncDesired(ctx context.Context, nodeID string) {
 	var models []proto.DesiredModel
 	for _, a := range assigns {
 		st := c.Models.Status(a.Ref)
+		if a.GroupID != "" {
+			if dm, ok := c.poolDesired(ctx, a, st); ok {
+				models = append(models, dm)
+			}
+			continue
+		}
 		if st.State != modelcache.StateReady {
 			continue
 		}
@@ -468,7 +492,7 @@ func (c *Core) CatalogFit(ctx context.Context) (*provision.FitResponse, error) {
 	for _, a := range all {
 		byNode[a.NodeID] = append(byNode[a.NodeID], a)
 	}
-	var req provision.FitRequest
+	req := provision.FitRequest{Pool: true}
 	for _, n := range nodes {
 		if servesModels(n) {
 			req.Nodes = append(req.Nodes, fitNode(n, byNode[n.NodeID]))
@@ -489,6 +513,11 @@ type Replica struct {
 	LocalName string // the runtime's name for the model
 	Loaded    bool   // in memory; otherwise on disk and loaded on first use
 	Slots     int    // concurrent requests the node's runtime serves
+	// Route is the agent's inference route: "ollama", or "llamacpp:<id>"
+	// for a pooled model served by its leader.
+	Route string
+	// Pool lists the other nodes a pooled replica depends on.
+	Pool []string
 }
 
 // Replicas lists, per model, the online nodes that hold it.
@@ -497,6 +526,11 @@ func (c *Core) Replicas(ctx context.Context) (map[string][]Replica, error) {
 	if err != nil {
 		return nil, err
 	}
+	all, err := c.Store.ListAssignments(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	pooled := poolReadiness(nodes, all)
 	out := map[string][]Replica{}
 	for _, n := range nodes {
 		if n.State != store.StateAdopted {
@@ -508,12 +542,26 @@ func (c *Core) Replicas(ctx context.Context) (map[string][]Replica, error) {
 			slots = h.Inference.Slots
 		}
 		for _, m := range observedModels(n) {
+			switch m.Role {
+			case store.RoleWorker:
+				continue // workers serve their leader, not clients
+			case store.RoleLeader:
+				members, ready := pooled[m.AssignmentID]
+				if !ready {
+					continue
+				}
+				out[m.ModelID] = append(out[m.ModelID], Replica{
+					ModelID: m.ModelID, NodeID: n.NodeID, NodeName: n.Name, BaseURL: nodeBase(n), LocalName: m.LocalName,
+					Loaded: true, Slots: PoolParallel, Route: "llamacpp:" + m.AssignmentID, Pool: members,
+				})
+				continue
+			}
 			if m.LocalName == "" || (m.State != proto.ModelLoaded && m.State != proto.ModelInstalled) {
 				continue
 			}
 			out[m.ModelID] = append(out[m.ModelID], Replica{
 				ModelID: m.ModelID, NodeID: n.NodeID, NodeName: n.Name, BaseURL: nodeBase(n),
-				LocalName: m.LocalName, Loaded: m.State == proto.ModelLoaded, Slots: slots,
+				LocalName: m.LocalName, Loaded: m.State == proto.ModelLoaded, Slots: slots, Route: "ollama",
 			})
 		}
 	}

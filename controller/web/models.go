@@ -39,6 +39,9 @@ type CatalogView struct {
 	Fit map[string]map[string]FitSummary `json:"fit"`
 	// Cache[ref] for every quant the Controller has (or is fetching).
 	Cache map[string]modelcache.Entry `json:"cache"`
+	// Pools[model_id] suggests splitting a model across nodes when no
+	// single node can hold it.
+	Pools map[string]provision.PoolResult `json:"pools"`
 }
 
 func (s *Server) catalog(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +50,7 @@ func (s *Server) catalog(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "catalog_unavailable", err.Error())
 		return
 	}
-	view := CatalogView{Catalog: cat, Fit: map[string]map[string]FitSummary{}, Cache: map[string]modelcache.Entry{}}
+	view := CatalogView{Catalog: cat, Fit: map[string]map[string]FitSummary{}, Cache: map[string]modelcache.Entry{}, Pools: map[string]provision.PoolResult{}}
 	if fr, err := s.core.CatalogFit(r.Context()); err == nil {
 		for _, res := range fr.Results {
 			if view.Fit[res.ModelID] == nil {
@@ -56,6 +59,9 @@ func (s *Server) catalog(w http.ResponseWriter, r *http.Request) {
 			view.Fit[res.ModelID][res.NodeID] = FitSummary{
 				Fits: res.Fits, Quant: res.Quant, Placement: res.Placement, Need: res.Need, Reason: res.Reason, Options: res.Options,
 			}
+		}
+		for _, p := range fr.Pools {
+			view.Pools[p.ModelID] = p
 		}
 	} else {
 		s.log.Warn("catalog fit failed", "err", err)
@@ -142,7 +148,8 @@ func (s *Server) modelError(w http.ResponseWriter, err error) {
 		httpx.WriteError(w, http.StatusNotFound, proto.ErrNotFound, err.Error())
 	case errors.Is(err, core.ErrUnknownModel):
 		httpx.WriteError(w, http.StatusNotFound, "unknown_model", err.Error())
-	case errors.Is(err, core.ErrAlreadyThere), errors.Is(err, core.ErrNotAdopted), errors.Is(err, core.ErrNoNodeFits):
+	case errors.Is(err, core.ErrAlreadyThere), errors.Is(err, core.ErrNotAdopted), errors.Is(err, core.ErrNoNodeFits),
+		errors.Is(err, core.ErrNoPoolNeeded), errors.Is(err, core.ErrPooledSwap):
 		httpx.WriteError(w, http.StatusConflict, proto.ErrWrongState, err.Error())
 	case strings.Contains(err.Error(), "provisioner:"):
 		httpx.WriteError(w, http.StatusServiceUnavailable, "provisioner_unavailable", err.Error())

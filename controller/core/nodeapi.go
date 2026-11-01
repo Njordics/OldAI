@@ -113,10 +113,12 @@ func (c *Core) handleHeartbeat(w http.ResponseWriter, r *http.Request, leaf *x50
 	remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	health, _ := json.Marshal(hb.Health)
 
+	addrChanged := false
 	update := func(n *store.Node) error {
 		if n.State == store.StateReleased {
 			return errReleased
 		}
+		addrChanged = n.Addr != "" && n.Addr != remoteIP
 		prev := n.State
 		setState(n, store.StateAdopted, now)
 		switch prev {
@@ -156,6 +158,10 @@ func (c *Core) handleHeartbeat(w http.ResponseWriter, r *http.Request, leaf *x50
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, proto.ErrInternal, err.Error())
 		return
+	}
+	if addrChanged {
+		// Pool leaders dial their workers by address.
+		go c.resyncPoolsOf(context.Background(), hb.NodeID)
 	}
 	life := leaf.NotAfter.Sub(leaf.NotBefore)
 	httpx.WriteJSON(w, http.StatusOK, proto.HeartbeatResp{

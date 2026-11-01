@@ -70,6 +70,7 @@ func (c *Core) OnSighting(ctx context.Context, s Sighting) {
 		return
 	}
 
+	moved := n.Addr != "" && (n.Addr != s.Addr || n.Port != s.Port)
 	n.Addr, n.Port, n.FP = s.Addr, s.Port, s.FP
 	n.AgentState, n.ClusterID = s.State, s.ClusterID
 	n.HWSummary, n.PairingRequired, n.AgentVersion = s.HW, s.PairingRequired, s.AgentVersion
@@ -102,6 +103,11 @@ func (c *Core) OnSighting(ctx context.Context, s Sighting) {
 	}
 	if err := c.Store.PutNode(ctx, n); err != nil {
 		c.log.Error("save node", "err", err)
+		return
+	}
+	if moved && s.State == proto.AgentAdopted && ours {
+		// Pool leaders dial their workers at this address.
+		go c.resyncPoolsOf(context.Background(), n.NodeID)
 	}
 }
 

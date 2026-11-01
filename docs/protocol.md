@@ -198,6 +198,9 @@ Base URL: `https://<slave>:7450`, mTLS, client cert must carry `aicluster://cont
 | `GET /v1/logs?unit=agent|runtime&since=…&follow=1` | NDJSON stream of journald entries |
 | `ANY /v1/infer/{runtime}/{path…}` | reverse proxy to local runtime, e.g. `/v1/infer/ollama/v1/chat/completions`. Streams are passed through unbuffered. |
 | `GET /metrics` | Prometheus (also on `:9464` for scrapers) |
+| `GET /v1/rpc-tunnel/{group}` | **Node-to-node**, not Controller: only the leader of pool `{group}` (client cert `aicluster://node/<leader>`). Without `Upgrade` returns `{"epoch"}` of the local rpc-server; with `Upgrade: aicluster-rpc` answers `101` and splices to it. |
+
+Pooled models add to `DesiredModel`: `role` (`leader` \| `worker`) and `pool` `{group_id, leader, members[{node_id, endpoint, share, leader}], layers, parallel}`; `ObservedModel` echoes `role`. The gateway reaches a pool through the leader's `/v1/infer/llamacpp:<assignment_id>/v1/...`.
 
 All mutating ops return a `job_id`. Jobs survive agent restarts (persisted in `/var/lib/aicluster/jobs/`).
 
