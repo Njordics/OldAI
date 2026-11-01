@@ -7,7 +7,32 @@ Two images, both unattended Ubuntu Server 24.04 installs:
 | `aicluster-controller-<version>.iso` | `aiclusterd`, the `aicluster` CLI, the provisioner and the model catalog | `aicluster-controller` |
 | `aicluster-slave-<version>.iso` | `aicluster-agent`, Ollama, and llama.cpp's `ggml-rpc-server`/`llama-server` plus the OpenMP library they need (pooled models) | `aicluster-node-<6 chars of machine-id>` |
 
-Booting either one shows a menu that starts the install after 10 seconds. **The install erases the largest disk** without asking: that is the point of an unattended image, so don't leave the stick plugged into a machine you care about. The machine reboots into the installed system when it is done. Pick "Boot from the next device" to skip.
+Booting either one shows a menu that starts the install after 10 seconds. **The install erases every internal disk** without asking: that is the point of an unattended image, so don't leave the stick plugged into a machine you care about. The machine reboots into the installed system when it is done. Pick "Boot from the next device" to skip.
+
+## Disk wipe
+
+Before the installer looks at the disks, `iso/payload/wipe-disks.sh` erases every internal disk.
+- **What's skipped:** USB and removable drives, the install medium itself, optical drives and virtual block devices.
+- **On each disk:**
+  1. Stop any LVM, RAID or swap that uses it.
+  2. Remove every partition, filesystem, RAID and LVM signature, and zap both GPT copies.
+  3. Discard (TRIM) the whole device.
+- **SSDs and NVMe drives:** after the discard the old data reads back as zeros or is gone.
+- **Spinning disks** can't discard, so their first and last 64 MiB are zeroed instead. Nothing can mount or see the old data, but it stays on the platters until overwritten, and forensic tools could recover it.
+
+The OS then goes on the largest disk. Any others are left empty.
+
+## Slave network
+
+The Controller image starts `aiclusterd --slave-net=auto` (in `/etc/aicluster/controller.env`).
+- **Joining:** Slaves are found and adopted on your home network as usual.
+- **Moving:** the Controller then moves them to its own subnet on the same wire, `10.10.10.0/24` unless your network already uses it. The Controller is `10.10.10.1` and is the Slaves' only DHCP and DNS server.
+- **Your network:** the Controller keeps its home address, and its DHCP answers only adopted Slaves, so your router and other devices are unaffected.
+- **Limits:** this is a logical separation on the shared switch, not a security boundary. Slaves still have no internet access, because the Controller never forwards packets.
+- **Status:** Settings shows the subnet, and each node's details show which network it is on.
+- **Opting out:** set `AICLUSTERD_ARGS=--slave-net=off` and restart `aiclusterd`.
+
+A Slave that can't reach the Controller on the new subnet within 90 s rolls back to the home network and retries after 10 minutes. A Slave that loses the Controller for 10 minutes goes back to the home network on its own, and so does a released or factory-reset one. Details: [protocol.md §12](protocol.md#12-slave-network).
 
 The install works without internet; Ubuntu packages come from the ISO itself. With internet it also applies security updates.
 
@@ -54,7 +79,8 @@ On a Slave, the console escape hatch `aicluster-agent factory-reset` needs a con
 
 - **Controller:**
   - `aicluster-provisioner.service` (Python, unix socket `/run/aicluster/provisioner.sock`).
-  - `aiclusterd.service` (state in `/var/lib/aicluster/controller`, extra flags in `/etc/aicluster/controller.env` as `AICLUSTERD_ARGS=`).
+  - `aiclusterd.service` (state in `/var/lib/aicluster/controller`, flags in `/etc/aicluster/controller.env` as `AICLUSTERD_ARGS=`, default `--slave-net=auto`). It holds only the network capabilities the Slave network needs: adding its address and serving DHCP and DNS.
+  - `/etc/sysctl.d/60-aicluster.conf` keeps IP forwarding off.
   - Both run as the unprivileged `aicluster` user.
   - The catalog goes in `/usr/share/aicluster/catalog`; local additions go in `/etc/aicluster/catalog.d`.
 - **Slave:**
@@ -80,7 +106,14 @@ QEMU/KVM inside WSL2 on an isolated bridge with DHCP, 6 GB RAM and 4 vCPUs per V
   - Only the Controller had internet. It cached `qwen2.5:0.5b` from registry.ollama.ai, a Slave's Ollama pulled it through the shim, and a chat through the Controller answered.
   - `qwen2.5:1.5b` was pooled across both Slaves: leader 60% on its CPU, worker 40% (11 layers) over the RPC tunnel. A chat through the Controller answered.
 
-Not tested: physical hardware, booting from USB, GPUs.
+- **Wipe:** a Slave was reinstalled over its previous LVM install, with a second disk carrying a partition and marker data at its start, middle and end. Both disks were discarded, the second came out with no partitions and no markers, and the OS installed on the first.
+- **Slave network:**
+  - The Controller picked `10.10.10.0/24` next to its home address. Both Slaves were adopted on the home network, then moved to `10.10.10.10`/`.11`.
+  - On a Slave: the only address is the Slave one, DNS is the Controller, and cluster names resolve while `example.com` is refused. The home router and the internet are unreachable.
+  - A normal and a pooled model both served chats over the Slave network.
+  - Releasing a Slave put it back on the home network.
+
+Not tested: physical hardware, booting from USB, GPUs, spinning disks (the non-discard wipe path), a home network that already uses `10.10.10.0/24`.
 
 ## Not covered yet
 

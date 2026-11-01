@@ -116,6 +116,7 @@ func (a *Agent) heartbeatOnce(ctx context.Context, client *http.Client, ad *adop
 		a.log.Warn("heartbeat failed", "err", err)
 		return
 	}
+	a.noteHeartbeatOK()
 	if sendObs {
 		a.mu.Lock()
 		a.lastObsSent, a.lastObs = time.Now(), obsJSON
@@ -162,9 +163,17 @@ const errNoEndpoints = agentError("no controller endpoints known")
 func (a *Agent) applyHeartbeatResp(ctx context.Context, client *http.Client, ad *adopted, ep string, resp proto.HeartbeatResp) {
 	a.mu.Lock()
 	changed := false
-	if len(resp.ControllerEndpoints) > 0 && !slices.Equal(resp.ControllerEndpoints, ad.Controller.Endpoints) {
-		ad.Controller.Endpoints = slices.Clone(resp.ControllerEndpoints)
-		changed = true
+	if len(resp.ControllerEndpoints) > 0 {
+		// The Controller's list, but the endpoint that just answered stays
+		// first: on the Slave network the home addresses only time out.
+		eps := slices.Clone(resp.ControllerEndpoints)
+		if i := slices.Index(eps, ep); i > 0 {
+			eps = append([]string{ep}, slices.Delete(eps, i, i+1)...)
+		}
+		if !slices.Equal(eps, ad.Controller.Endpoints) {
+			ad.Controller.Endpoints = eps
+			changed = true
+		}
 	}
 	if resp.HeartbeatIntervalS > 0 && resp.HeartbeatIntervalS != ad.HeartbeatIntervalS {
 		ad.HeartbeatIntervalS = resp.HeartbeatIntervalS

@@ -351,6 +351,11 @@ func (c *Core) Release(ctx context.Context, nodeID string, keepModels bool) erro
 	if err := c.Store.DeleteNodeAssignments(ctx, nodeID); err != nil {
 		return err
 	}
+	// A released node goes back to the home network (the agent reverts its
+	// interface on release), so its Slave-network address is free again.
+	if err := c.Store.DeleteSlaveLease(ctx, nodeID); err != nil {
+		return err
+	}
 	_, err = c.Store.UpdateNode(ctx, nodeID, func(m *store.Node) error {
 		setState(m, store.StateReleased, time.Now().UTC())
 		m.CertSerial, m.Phase, m.Returning = "", "", false

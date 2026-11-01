@@ -144,6 +144,7 @@ func (a *Agent) observed() *proto.ObservedState {
 		Conditions:         conds,
 		Versions:           versions,
 		Models:             models,
+		Network:            a.observedNetworkLocked(),
 	}
 }
 

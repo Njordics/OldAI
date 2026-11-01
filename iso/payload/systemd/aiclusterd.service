@@ -11,6 +11,10 @@ StateDirectory=aicluster
 StateDirectoryMode=0750
 EnvironmentFile=-/etc/aicluster/controller.env
 ExecStart=/usr/bin/aiclusterd $AICLUSTERD_ARGS
+# Slave network: add its address, serve DHCP (port 67, bound to the
+# interface) and DNS (port 53). Nothing else runs privileged.
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 Restart=always
 RestartSec=3
 LimitNOFILE=65536

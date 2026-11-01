@@ -261,6 +261,10 @@ For models no single node can hold, one copy can be split across several nodes w
 - **Serving:** the gateway offers a pooled model only while its leader and every worker report loaded and are online, and sends requests to the leader's agent route `llamacpp:<assignment>`.
 - **Trade-offs:** slower than one machine (every token crosses every member; 10 Gb+ networking helps), and the model is down whenever any member is.
 
-## 13. Out of scope for v1
+## 13. Slave network
+
+Adopted Slaves move off the home network onto a subnet that the Controller runs on the same wire (default `10.10.10.0/24`, chosen to avoid the Controller's own networks). The Controller adds a second address to its LAN interface and is the only DHCP and DNS server there. It answers only the MACs of adopted nodes, so other devices and the home router never see it. Each Slave switches its interface to accept leases only from the Controller and verifies that it can still reach the Controller, otherwise it rolls back. It returns to the home network on release, on factory reset, or after 10 minutes without the Controller. The Controller never forwards packets, so Slaves still reach nothing but the Controller. Wire details: [protocol.md §12](protocol.md#12-slave-network).
+
+## 14. Out of scope for v1
 
 Controller HA; multi-subnet discovery (manual `aicluster nodes add <ip>` covers it); tensor parallelism across Slaves (vLLM + Ray); fine-tuning; per-user quotas beyond per-key rate limits.

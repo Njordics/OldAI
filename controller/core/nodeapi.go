@@ -159,6 +159,9 @@ func (c *Core) handleHeartbeat(w http.ResponseWriter, r *http.Request, leaf *x50
 		httpx.WriteError(w, http.StatusInternalServerError, proto.ErrInternal, err.Error())
 		return
 	}
+	if hb.Observed != nil && hb.Observed.Network != nil {
+		c.noteSlaveMAC(ctx, hb.NodeID, hb.Observed.Network.MAC)
+	}
 	if addrChanged {
 		// Pool leaders dial their workers by address.
 		go c.resyncPoolsOf(context.Background(), hb.NodeID)

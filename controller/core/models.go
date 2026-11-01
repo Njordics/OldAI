@@ -375,6 +375,7 @@ func (c *Core) SyncDesired(ctx context.Context, nodeID string) {
 			Residency: a.Residency, Size: st.BytesTotal,
 		})
 	}
+	network := c.slaveNetworkFor(ctx, nodeID)
 	var changed bool
 	var desired proto.DesiredState
 	n, err := c.Store.UpdateNode(ctx, nodeID, func(n *store.Node) error {
@@ -386,14 +387,14 @@ func (c *Core) SyncDesired(ctx context.Context, nodeID string) {
 		if len(models) > 0 {
 			runtimes = []proto.RuntimeSpec{{Kind: "ollama"}}
 		}
-		before, _ := json.Marshal([]any{desired.Models, desired.Runtimes, desired.NodeName})
-		after, _ := json.Marshal([]any{models, runtimes, n.Name})
+		before, _ := json.Marshal([]any{desired.Models, desired.Runtimes, desired.NodeName, desired.Network})
+		after, _ := json.Marshal([]any{models, runtimes, n.Name, network})
 		if string(before) == string(after) && desired.GCGraceS == int(c.cfg.ModelGCGrace/time.Second) {
 			return nil
 		}
 		changed = true
 		desired.V, desired.NodeName = proto.Version, n.Name
-		desired.Models, desired.Runtimes = models, runtimes
+		desired.Models, desired.Runtimes, desired.Network = models, runtimes, network
 		desired.GCGraceS = int(c.cfg.ModelGCGrace / time.Second)
 		desired.Generation = n.DesiredGen + 1
 		n.DesiredGen = desired.Generation

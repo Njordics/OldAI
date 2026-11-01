@@ -153,6 +153,14 @@ function duration(sec) {
 
 const VENDOR = { nvidia: "NVIDIA", amd: "AMD", intel: "Intel" };
 
+// networkLabel says which network a node is on (Slave network or home LAN).
+function networkLabel(o) {
+  const where = o.on_slave_net ? "Slave network" : "Home network";
+  const nic = o.iface ? ` · ${esc(o.iface)}` : "";
+  const err = o.error ? `<div class="muted">${esc(o.error)}</div>` : "";
+  return `${where}${nic}${err}`;
+}
+
 function hwLabel(s) {
   if (!s || s === "cpu") return "CPU only";
   const [vendor, rest] = s.split(":");
@@ -298,6 +306,7 @@ function renderDrawer() {
 
   parts.push(`<div class="section"><h3>Overview</h3>${kv([
     ["Address", `<span class="mono">${esc(n.addr || "—")}${n.port ? ":" + n.port : ""}</span>`],
+    obs?.network ? ["Network", networkLabel(obs.network)] : null,
     ["Hardware", hwLabel(n.hw_summary)],
     ["Agent", esc(n.agent_version || "—")],
     ["Phase", esc(n.phase || "—")],
@@ -393,6 +402,9 @@ function renderSettings() {
     ["CA fingerprint", `<span class="mono">${esc(c.ca_fp)}</span>`],
     ["Controller certificate", `<span class="mono">${esc(c.controller_fp)}</span>`],
     ["Node API endpoints", (c.endpoints || []).map(e => `<div class="mono">${esc(e)}</div>`).join("") || "—"],
+    ["Slave network", c.slave_net
+      ? `<span class="mono">${esc(c.slave_net.subnet)}</span> on ${esc(c.slave_net.iface)}<div class="muted">The Controller (${esc(c.slave_net.controller_ip)}) is the DHCP and DNS server for adopted nodes. Other devices on your network are not affected.</div>`
+      : `Off <div class="muted">Nodes stay on your home network.</div>`],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
   const pill = $("#mode-pill");
   pill.textContent = c.adoption_mode === "auto" ? "Auto-adopt on" : "Approval required";

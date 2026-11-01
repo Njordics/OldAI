@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"aicluster/common/discovery"
@@ -53,16 +54,31 @@ func (a *Agent) announceLoop(ctx context.Context) {
 		defer sender.Close()
 	}
 
+	// mDNS records carry the addresses the node had when it registered, so
+	// it registers again when they change (e.g. after moving to the Slave
+	// network); otherwise listeners keep seeing the old address.
 	var ann *discovery.Announcer
-	b := a.announcement()
-	if a.cfg.MDNS {
-		instance := "aic-" + b.NodeID[:8]
-		if ann, err = discovery.Announce(instance, proto.SlaveMDNSService, a.port, txtFor(b)); err != nil {
+	var annAddrs string
+	announce := func(b proto.Beacon) {
+		if ann != nil {
+			ann.Close()
+			ann = nil
+		}
+		var err error
+		if ann, err = discovery.Announce("aic-"+b.NodeID[:8], proto.SlaveMDNSService, a.port, txtFor(b)); err != nil {
 			a.log.Error("mdns announce disabled", "err", err)
 			ann = nil
-		} else {
-			defer ann.Close()
 		}
+		annAddrs = strings.Join(b.Addrs, ",")
+	}
+	defer func() {
+		if ann != nil {
+			ann.Close()
+		}
+	}()
+	b := a.announcement()
+	if a.cfg.MDNS {
+		announce(b)
 	}
 
 	for {
@@ -72,7 +88,10 @@ func (a *Agent) announceLoop(ctx context.Context) {
 				a.log.Debug("beacon send failed", "err", err)
 			}
 		}
-		if ann != nil {
+		if a.cfg.MDNS && strings.Join(b.Addrs, ",") != annAddrs {
+			a.log.Info("addresses changed; announcing again", "addrs", b.Addrs)
+			announce(b)
+		} else if ann != nil {
 			ann.Update(txtFor(b))
 		}
 		every := a.cfg.UnadoptedBeaconEvery

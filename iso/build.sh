@@ -141,7 +141,7 @@ for b in "${bins[@]}"; do
 	[ -f "$bin/$b" ] || die "$bin/$b missing; run 'make build' first"
 	install -m 0755 "$bin/$b" "$stage/aicluster/bin/$b"
 done
-install -m 0755 iso/payload/install-target.sh iso/payload/console-status "$stage/aicluster/"
+install -m 0755 iso/payload/install-target.sh iso/payload/console-status iso/payload/wipe-disks.sh "$stage/aicluster/"
 cp iso/payload/systemd/* "$stage/aicluster/systemd/"
 
 components="ubuntu=$base_name"

@@ -27,6 +27,7 @@ import (
 	"aicluster/common/proto"
 	"aicluster/controller/modelcache"
 	"aicluster/controller/provision"
+	"aicluster/controller/slavenet"
 	"aicluster/controller/store"
 )
 
@@ -64,6 +65,11 @@ type Config struct {
 	RegistryUpstream string
 	// ModelGCGrace is how long a Slave keeps an unassigned model on disk.
 	ModelGCGrace time.Duration
+	// SlaveNet moves adopted Slaves onto the Controller's own subnet on the
+	// same wire (§12): "off" (default), "auto", or a CIDR.
+	SlaveNet string
+	// SlaveIface carries the Slave network (default: the default-route interface).
+	SlaveIface string
 }
 
 func (c *Config) defaults() {
@@ -114,6 +120,7 @@ type Core struct {
 
 	nodeLn    net.Listener
 	endpoints []string
+	slaveNet  *slavenet.Net // nil unless the Slave network is on
 
 	Prov   *provision.Client
 	Models *modelcache.Cache
@@ -162,6 +169,9 @@ func New(cfg Config, log *slog.Logger) (*Core, error) {
 		return nil, fmt.Errorf("model cache: %w", err)
 	}
 	c.Models.OnReady = c.onModelCached
+	if err := c.setupSlaveNet(ctx); err != nil {
+		log.Error("slave network disabled; Slaves stay on the home network", "err", err)
+	}
 	if err := c.loadPKI(); err != nil {
 		return nil, fmt.Errorf("pki: %w", err)
 	}
@@ -284,8 +294,19 @@ func (c *Core) ListenNodeAPI() error {
 	port := ln.Addr().(*net.TCPAddr).Port
 	c.endpoints = c.cfg.Advertise
 	if len(c.endpoints) == 0 {
+		var slaveEP string
 		for _, ip := range discovery.LocalIPv4s() {
-			c.endpoints = append(c.endpoints, "https://"+net.JoinHostPort(ip, strconv.Itoa(port)))
+			ep := "https://" + net.JoinHostPort(ip, strconv.Itoa(port))
+			if c.slaveNet != nil && ip == c.slaveNet.ControllerIP.String() {
+				slaveEP = ep
+				continue
+			}
+			c.endpoints = append(c.endpoints, ep)
+		}
+		// Last: a Slave still on the home network would wait for it to time
+		// out before trying the others.
+		if slaveEP != "" {
+			c.endpoints = append(c.endpoints, slaveEP)
 		}
 	}
 	return nil
@@ -301,6 +322,9 @@ func (c *Core) Run(ctx context.Context) error {
 	}
 	c.log.Info("controller core starting", "cluster_id", c.ClusterID, "mode", c.Mode(), "endpoints", c.endpoints)
 	c.ensureAssignedCached(ctx)
+	if c.slaveNet != nil {
+		c.serveSlaveNet(ctx)
+	}
 	var wg sync.WaitGroup
 	for _, loop := range []func(context.Context){c.discoveryLoop, c.announceLoop, c.monitorLoop} {
 		wg.Add(1)

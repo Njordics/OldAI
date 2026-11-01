@@ -127,6 +127,64 @@ var migrations = []string{
 	`ALTER TABLE assignments ADD COLUMN role TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE assignments ADD COLUMN share REAL NOT NULL DEFAULT 0`,
 	`CREATE INDEX assignments_group ON assignments(group_id)`,
+	`CREATE TABLE slave_leases (node_id TEXT PRIMARY KEY, ip TEXT NOT NULL UNIQUE, mac TEXT NOT NULL DEFAULT '')`,
+}
+
+// SlaveLease reserves an address on the Slave network for a node; the MAC
+// is filled in once the node reports which interface it uses.
+type SlaveLease struct {
+	NodeID string
+	IP     string
+	MAC    string
+}
+
+func (s *Store) SlaveLease(ctx context.Context, nodeID string) (*SlaveLease, error) {
+	l := &SlaveLease{NodeID: nodeID}
+	err := s.db.QueryRowContext(ctx, `SELECT ip, mac FROM slave_leases WHERE node_id=?`, nodeID).Scan(&l.IP, &l.MAC)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return l, err
+}
+
+func (s *Store) ListSlaveLeases(ctx context.Context) ([]SlaveLease, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT node_id, ip, mac FROM slave_leases ORDER BY ip`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SlaveLease
+	for rows.Next() {
+		var l SlaveLease
+		if err := rows.Scan(&l.NodeID, &l.IP, &l.MAC); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) PutSlaveLease(ctx context.Context, l SlaveLease) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(ctx, `INSERT INTO slave_leases(node_id, ip, mac) VALUES(?,?,?)
+		ON CONFLICT(node_id) DO UPDATE SET ip=excluded.ip, mac=excluded.mac`, l.NodeID, l.IP, l.MAC)
+	return err
+}
+
+func (s *Store) DeleteSlaveLease(ctx context.Context, nodeID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(ctx, `DELETE FROM slave_leases WHERE node_id=?`, nodeID)
+	return err
+}
+
+// ClearSlaveLeases drops every reservation (the subnet changed).
+func (s *Store) ClearSlaveLeases(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(ctx, `DELETE FROM slave_leases`)
+	return err
 }
 
 func Open(path string) (*Store, error) {

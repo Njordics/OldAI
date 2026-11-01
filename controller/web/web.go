@@ -118,23 +118,36 @@ func (s *Server) trustInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 type ClusterInfo struct {
-	ClusterID    string   `json:"cluster_id"`
-	CAFP         string   `json:"ca_fp"`
-	ControllerFP string   `json:"controller_fp"`
-	Endpoints    []string `json:"endpoints"`
-	AdoptionMode string   `json:"adoption_mode"`
-	GatewayURLs  []string `json:"gateway_urls"`
+	ClusterID    string        `json:"cluster_id"`
+	CAFP         string        `json:"ca_fp"`
+	ControllerFP string        `json:"controller_fp"`
+	Endpoints    []string      `json:"endpoints"`
+	AdoptionMode string        `json:"adoption_mode"`
+	GatewayURLs  []string      `json:"gateway_urls"`
+	SlaveNet     *SlaveNetInfo `json:"slave_net,omitempty"`
+}
+
+// SlaveNetInfo describes the Controller's own subnet for Slaves (§12).
+type SlaveNetInfo struct {
+	Subnet       string `json:"subnet"`
+	ControllerIP string `json:"controller_ip"`
+	Iface        string `json:"iface"`
+	Domain       string `json:"domain"`
 }
 
 func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteJSON(w, http.StatusOK, ClusterInfo{
+	info := ClusterInfo{
 		ClusterID:    s.core.ClusterID,
 		CAFP:         pki.Fingerprint(s.core.CA.Cert.Raw),
 		ControllerFP: s.core.CertFP(),
 		Endpoints:    s.core.Endpoints(),
 		AdoptionMode: s.core.Mode(),
 		GatewayURLs:  s.gatewayURLs(),
-	})
+	}
+	if n := s.core.SlaveNet(); n != nil {
+		info.SlaveNet = &SlaveNetInfo{Subnet: n.Subnet.String(), ControllerIP: n.ControllerIP.String(), Iface: n.Iface, Domain: n.Domain}
+	}
+	httpx.WriteJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {

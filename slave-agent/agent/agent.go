@@ -20,6 +20,7 @@ import (
 	"aicluster/common/pki"
 	"aicluster/common/proto"
 	"aicluster/slave-agent/inventory"
+	"aicluster/slave-agent/netcfg"
 	"aicluster/slave-agent/runtime"
 )
 
@@ -66,6 +67,9 @@ type Config struct {
 	// LlamaCppDir holds llama.cpp's rpc-server and llama-server, used for
 	// models split across nodes.
 	LlamaCppDir string
+	// ManageNetwork lets the agent move its interface onto the Controller's
+	// Slave network when asked (Linux with systemd-networkd only).
+	ManageNetwork bool
 }
 
 func (c *Config) defaults() {
@@ -141,6 +145,10 @@ type Agent struct {
 	shimMu     sync.Mutex
 	shimHTTP   *http.Client
 	shimFor    *adopted
+
+	netMgr *netcfg.Manager // nil when this node can't switch networks
+	net    netState
+	netC   chan struct{}
 }
 
 func New(cfg Config, log *slog.Logger) (*Agent, error) {
@@ -152,6 +160,7 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		wakeHB:     make(chan struct{}, 1),
 		stateC:     make(chan struct{}, 1),
 		reconcileC: make(chan struct{}, 1),
+		netC:       make(chan struct{}, 1),
 		desiredC:   make(chan struct{}),
 		models:     newModelTracker(),
 	}
@@ -159,6 +168,7 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		return nil, err
 	}
 	a.loadManaged()
+	a.initNetwork()
 	a.pools.entries = map[string]*poolEntry{}
 	switch cfg.Runtime {
 	case "ollama":
@@ -274,7 +284,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	tlsLn := tls.NewListener(a.ln, a.serverTLS())
 
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator, a.serveShim, a.modelLoop} {
+	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator, a.serveShim, a.modelLoop, a.netLoop} {
 		wg.Add(1)
 		go func() { defer wg.Done(); loop(ctx) }()
 	}
@@ -374,6 +384,9 @@ func FactoryReset(cfg Config, log *slog.Logger) error {
 	if err := a.loadOrInit(); err != nil {
 		return err
 	}
+	// Back to the home network, so a new Controller can find this node.
+	a.initNetwork()
+	a.leaveSlaveNet(context.Background(), "factory reset from console")
 	// Models stay on disk: the runtime may not be running at the console.
 	return a.release("factory reset from console", true, true)
 }
@@ -384,4 +397,5 @@ func (a *Agent) signalDesiredLocked() {
 	close(a.desiredC)
 	a.desiredC = make(chan struct{})
 	nudge(a.reconcileC)
+	nudge(a.netC)
 }

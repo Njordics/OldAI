@@ -6,6 +6,10 @@ autoinstall:
   interactive-sections: []
   refresh-installer:
     update: false
+  # Erase every internal disk before the installer looks at them (see
+  # iso/payload/wipe-disks.sh); the OS then goes on the largest one.
+  early-commands:
+    - bash /cdrom/aicluster/wipe-disks.sh
   locale: en_US.UTF-8
   keyboard:
     layout: us

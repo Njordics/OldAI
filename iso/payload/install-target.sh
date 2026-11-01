@@ -43,7 +43,11 @@ controller)
 	install -d -o aicluster -g aicluster -m 0750 /var/lib/aicluster /var/lib/aicluster/controller
 	sed 's/0750 root root/0750 aicluster aicluster/' "$src/systemd/aicluster.tmpfiles" >/etc/tmpfiles.d/aicluster.conf
 	install -m 0644 "$src/systemd/aiclusterd.service" "$src/systemd/aicluster-provisioner.service" /etc/systemd/system/
-	[ -f /etc/aicluster/controller.env ] || echo 'AICLUSTERD_ARGS=' >/etc/aicluster/controller.env
+	# Slaves move to the Controller's own subnet after adoption (docs/iso.md).
+	[ -f /etc/aicluster/controller.env ] || echo 'AICLUSTERD_ARGS=--slave-net=auto' >/etc/aicluster/controller.env
+	# The Controller is the Slaves' gateway only so broadcasts work; it must
+	# never route them anywhere.
+	echo 'net.ipv4.ip_forward = 0' >/etc/sysctl.d/60-aicluster.conf
 	units+=(aicluster-provisioner.service aiclusterd.service)
 	;;
 slave)

@@ -489,3 +489,29 @@ CLI mapping: `aicluster nodes [ls|show|adopt|release|drain|reboot]`, `aicluster 
 
 - Protocol major `v` changes only on breaking changes. The Controller supports agents of the current and previous major so that rolling agent upgrades work.
 - Agent advertises `agent_version`; Controller refuses to send desired-state fields unknown to that version (feature flags derived from version).
+
+## 12. Slave network
+
+With `aiclusterd --slave-net=auto` (the Controller ISO's default), adopted Slaves leave the home network for a subnet the Controller runs on the **same wire**. The Controller is that subnet's only DHCP and DNS server. It is a logical separation, not a security boundary: anything on the switch can still reach the subnet if it configures an address in it.
+
+**Controller**
+- **Subnet:** picks the first of `10.10.10.0/24`, `10.10.20.0/24`, `10.20.30.0/24`, `172.31.250.0/24`, `192.168.250.0/24` that overlaps none of its own networks, or uses the CIDR given. The choice is stored, so addresses survive restarts. If the subnet changes, all reservations are dropped.
+- **Address:** adds `.1` to the default-route interface (or `--slave-iface`) and re-adds it if networkd removes it. Node-API endpoints list that address **last**, so Slaves still on the home network don't wait on it.
+- **DHCP** (UDP 67, bound to the interface): answers **only MACs with a reservation**, and only DISCOVERs or REQUESTs aimed at itself. Your router and every other device are ignored.
+  - Offers: the reserved address, the mask, DNS = `.1`, router = `.1`, domain `aicluster`, the node name as hostname, a 12 h lease.
+  - A REQUEST for an address that isn't the reserved one gets a NAK.
+  - The router option only gives Slaves a default route for broadcasts. The ISO pins `net.ipv4.ip_forward = 0`, so the Controller never routes Slave traffic anywhere.
+- **DNS** (`.1:53`, UDP and TCP): `controller.aicluster` and `<node-name>.aicluster` (the node name lower-cased, other characters replaced by `-`). Every other name is REFUSED: Slaves have no internet access, so there is nothing else to resolve.
+- **Reservations** (`slave_leases`: node, IP, MAC): allocated from `.10` up. The MAC comes from the node's heartbeat. Releasing the node deletes its reservation.
+
+**Handoff**
+1. **Report:** in every heartbeat's observed state, the Slave reports `network {iface, mac, address, on_slave_net, error}`: the interface it reaches the Controller through. A node that can't switch networks (not Linux, or not using systemd-networkd, or `--manage-network=false`) reports nothing and stays where it is.
+2. **Reserve:** the Controller reserves an address for that MAC and adds `network {subnet, controller_ip, address, mac, domain, node_api_port}` to the node's desired state.
+3. **Switch:** if `mac` matches the interface it uses, the agent writes `/etc/systemd/network/05-aicluster-slave.network` and runs `networkctl reload` and `networkctl reconfigure <iface>`. The file sorts before netplan's `10-netplan-*` and matches on the MAC. It sets DHCPv4 with `AllowList=<controller_ip>` (the router's offers are ignored), no IPv6 RA and no link-local addressing.
+4. **Verify:** within 90 s the interface must hold the reserved address and reach `controller_ip:node_api_port`. Otherwise the file is removed and the interface returns to the home network. The error shows in observed state and the dashboard, and the agent retries after 10 minutes.
+5. **Done:** the agent puts `https://controller_ip:port` first in its Controller endpoints. From then on the endpoint that answered stays first, even when the Controller's list orders it last.
+
+**Back to the home network:** the agent removes the file and reconfigures the interface when:
+- the node is released, or factory reset from its console;
+- the desired state no longer has `network`;
+- there has been no successful heartbeat for 10 minutes, for example because the Controller is gone or broken. The node is then discoverable on the home network again, and the handoff repeats once the Controller is back.

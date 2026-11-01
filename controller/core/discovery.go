@@ -68,9 +68,19 @@ func (c *Core) OnSighting(ctx context.Context, s Sighting) {
 	var moved, lostIdentity bool
 	var revokeSerial string
 	apply := func(n *store.Node) error {
-		moved = n.Addr != "" && (n.Addr != s.Addr || n.Port != s.Port)
 		lostIdentity, revokeSerial = false, ""
-		n.Addr, n.Port, n.FP = s.Addr, s.Port, s.FP
+		// For our adopted nodes the heartbeat's source address is the truth
+		// (it arrives over mTLS); a sighting can carry a stale self-reported
+		// address, e.g. mDNS from before a move to the Slave network. The
+		// agent's port only sightings know.
+		heartbeating := s.State == proto.AgentAdopted && ours && n.State == store.StateAdopted &&
+			time.Since(n.LastHeartbeat) < 3*c.cfg.HeartbeatInterval
+		addr := s.Addr
+		if heartbeating {
+			addr = n.Addr
+		}
+		moved = n.Addr != "" && (n.Addr != addr || n.Port != s.Port)
+		n.Addr, n.Port, n.FP = addr, s.Port, s.FP
 		n.AgentState, n.ClusterID = s.State, s.ClusterID
 		n.HWSummary, n.PairingRequired, n.AgentVersion = s.HW, s.PairingRequired, s.AgentVersion
 		n.LastSeen = now

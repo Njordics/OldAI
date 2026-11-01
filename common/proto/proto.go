@@ -178,6 +178,30 @@ type DesiredState struct {
 	AgentVersion string         `json:"agent_version,omitempty"`
 	Runtimes     []RuntimeSpec  `json:"runtimes,omitempty"`
 	Models       []DesiredModel `json:"models,omitempty"`
+	// Network moves the node onto the Controller's own subnet (protocol §12).
+	// Absent: the node stays on whatever network it booted on.
+	Network *SlaveNetwork `json:"network,omitempty"`
+}
+
+// SlaveNetwork is the Controller's subnet for Slaves, on the same wire as
+// the home LAN. The Controller is its only DHCP and DNS server and answers
+// only reserved MACs, so other devices on the wire never see it.
+type SlaveNetwork struct {
+	Subnet       string `json:"subnet"`        // e.g. 10.10.10.0/24
+	ControllerIP string `json:"controller_ip"` // DHCP server, DNS server and node API
+	Address      string `json:"address"`       // reserved for this node
+	MAC          string `json:"mac"`           // the reservation is for this interface
+	Domain       string `json:"domain"`        // DNS zone the Controller serves, e.g. "aicluster"
+	NodeAPIPort  int    `json:"node_api_port"`
+}
+
+// ObservedNetwork is the interface a node uses to reach the Controller.
+type ObservedNetwork struct {
+	Iface      string `json:"iface"`
+	MAC        string `json:"mac"`
+	Address    string `json:"address"`
+	OnSlaveNet bool   `json:"on_slave_net"`
+	Error      string `json:"error,omitempty"`
 }
 
 type RuntimeSpec struct {
@@ -283,6 +307,7 @@ type ObservedState struct {
 	Conditions         []Condition       `json:"conditions"`
 	Versions           map[string]string `json:"versions"`
 	Models             []ObservedModel   `json:"models"`
+	Network            *ObservedNetwork  `json:"network,omitempty"`
 }
 
 const (
