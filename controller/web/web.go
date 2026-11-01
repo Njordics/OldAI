@@ -41,11 +41,13 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("PUT /api/v1/settings", s.putSettings)
 	s.modelRoutes(api)
 	s.keyRoutes(api)
+	s.workspaceRoutes(api)
 
 	ui, _ := fs.Sub(uiFiles, "ui")
 	mux := http.NewServeMux()
 	mux.Handle("/api/", s.auth(api))
 	mux.HandleFunc("GET /ca.crt", s.caCert)
+	mux.HandleFunc("GET /preview", s.preview)
 	mux.HandleFunc("GET /trust-info", s.trustInfo)
 	mux.HandleFunc("POST /session", s.login)
 	mux.HandleFunc("DELETE /session", s.logout)

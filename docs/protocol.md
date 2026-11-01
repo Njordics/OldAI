@@ -426,6 +426,18 @@ Routing:
 
 API keys: `aic_` + 40 base32 characters (200 random bits), created via CLI (`aicluster keys create`) or the dashboard's Connect page and shown once. Stored as SHA-256 (a slow password hash adds nothing for a random secret this long, and the gateway checks the key on every request); the first 8 characters are kept to look the row up and to display. Optional per-key `models` allow-list and `rpm` limit. Errors use OpenAI's `{"error":{"message","type","code"}}` shape (`missing_api_key`, `invalid_api_key`, `model_not_allowed`, `model_not_found`, `rate_limit_exceeded`, `queue_full`, `queue_timeout`, `no_healthy_node`).
 
+Code tab workspace (files kept in the Controller's database, so they follow the admin to any browser and are covered by backups; max 1 MB per file, 500 files; paths are relative, no `..`):
+
+```
+GET    /api/v1/workspace/files              list (no contents)
+GET    /api/v1/workspace/file?path=a/b.js   one file with content
+PUT    /api/v1/workspace/file  {path, content}
+POST   /api/v1/workspace/rename  {from, to}
+DELETE /api/v1/workspace/file?path=...
+GET    /api/v1/workspace/zip                everything as a .zip
+GET    /preview                             sandbox page for running HTML/CSS/JS (own CSP: sandbox, no network)
+```
+
 The dashboard's chat playground calls the same routing code through `POST /api/v1/playground/chat/completions` with the admin session instead of a key. Response header `X-AICluster-Node` names the serving node (can be disabled).
 
 ---

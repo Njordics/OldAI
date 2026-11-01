@@ -12,7 +12,7 @@ const hooks = {
   drawer: [],  // (node) => html, extra sections in the node drawer
   wire: [],    // () => void, once at startup
 };
-const VIEWS = ["nodes", "models", "chat", "connect", "settings"];
+const VIEWS = ["nodes", "models", "chat", "code", "connect", "settings"];
 
 const state = {
   nodes: [],

@@ -79,10 +79,13 @@ func (f *Fake) chat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	reply := fakeCodeReply(said, req.Model)
 	if len(said) > 200 {
 		said = said[:200] + "…"
 	}
-	reply := fmt.Sprintf("This is a stand-in reply from %s on %s (the fake runtime has no real model). You said: \"%s\"", req.Model, f.Label, said)
+	if reply == "" {
+		reply = fmt.Sprintf("This is a stand-in reply from %s on %s (the fake runtime has no real model). You said: \"%s\"", req.Model, f.Label, said)
+	}
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	created := time.Now().Unix()
 	isChat := strings.HasSuffix(r.URL.Path, "/chat/completions")
@@ -171,6 +174,42 @@ func (f *Fake) embed(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "model": req.Model, "data": data})
+}
+
+// fakeCodeReply mimics a coding assistant well enough to exercise the Code
+// tab: asked to change a fenced code block, it returns the same code with a
+// marker comment on top, so there is a real diff to review. Asked to explain,
+// or given no code, it returns "" and the caller uses the generic reply.
+func fakeCodeReply(msg, model string) string {
+	start := strings.Index(msg, "```")
+	if start < 0 || strings.HasPrefix(strings.TrimSpace(msg), "Explain") {
+		return ""
+	}
+	rest := msg[start+3:]
+	nl := strings.IndexByte(rest, '\n')
+	if nl < 0 {
+		return ""
+	}
+	tag := strings.TrimSpace(rest[:nl])
+	body := rest[nl+1:]
+	if end := strings.LastIndex(body, "```"); end >= 0 {
+		body = body[:end]
+	}
+	marker := "edited by the fake runtime (" + model + ")"
+	var line string
+	switch tag {
+	case "py", "python", "sh", "bash", "yaml", "yml", "toml", "rb":
+		line = "# " + marker
+	case "html", "htm", "xml", "svg", "md":
+		line = "<!-- " + marker + " -->"
+	case "css":
+		line = "/* " + marker + " */"
+	case "sql":
+		line = "-- " + marker
+	default:
+		line = "// " + marker
+	}
+	return "Here is the updated code:\n\n```" + tag + "\n" + line + "\n" + body + "```\n\n- Added a marker comment (the fake runtime cannot really edit code)."
 }
 
 // fakeVector is deterministic and unit-length, so cosine similarity works.

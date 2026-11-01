@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview</title>
+<!--
+  Served at /preview with its own Content-Security-Policy (see web/workspace.go):
+  sandboxed without same-origin, no network. The Code tab posts
+  {type:"run", html} here; console output and errors go back via postMessage.
+-->
+<script>
+(function () {
+  "use strict";
+  var bridge = "" +
+    "<script>(function(){" +
+    "function send(level,args){try{parent.postMessage({__aicPreview:1,level:level,text:Array.prototype.map.call(args,fmt).join(' ')},'*')}catch(e){}}" +
+    "function fmt(v){if(typeof v==='string')return v;if(v instanceof Error)return v.name+': '+v.message;try{return JSON.stringify(v)}catch(e){return String(v)}}" +
+    "['log','info','warn','error','debug'].forEach(function(l){var o=console[l];console[l]=function(){send(l==='debug'?'log':l,arguments);o.apply(console,arguments)}});" +
+    "addEventListener('error',function(e){send('error',[e.message+(e.lineno?' (line '+e.lineno+')':'')])});" +
+    "addEventListener('unhandledrejection',function(e){send('error',['Unhandled promise rejection: '+fmt(e.reason)])});" +
+    "})();<\/script>";
+
+  addEventListener("message", function (e) {
+    var d = e.data;
+    if (!d || d.type !== "run" || typeof d.html !== "string") return;
+    var html = d.html;
+    // Install the console bridge before any user script runs.
+    var at = html.search(/<head[^>]*>/i);
+    if (at >= 0) {
+      var end = html.indexOf(">", at) + 1;
+      html = html.slice(0, end) + bridge + html.slice(end);
+    } else {
+      html = bridge + html;
+    }
+    document.open();
+    document.write(html);
+    document.close();
+  });
+  parent.postMessage({ __aicPreview: 1, ready: true }, "*");
+})();
+</script>
+</head>
+<body></body>
+</html>

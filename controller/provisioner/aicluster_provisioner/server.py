@@ -97,6 +97,9 @@ def make_server(listen: str, store: CatalogStore):
         os.chmod(path, 0o660)
         return srv
     host, _, port = listen.removeprefix("tcp:").rpartition(":")
+    # On Windows SO_REUSEADDR lets a second process bind the same port and
+    # silently split traffic; refuse instead.
+    ThreadingHTTPServer.allow_reuse_address = os.name != "nt"
     srv = ThreadingHTTPServer((host or "127.0.0.1", int(port)), handler)
     srv.daemon_threads = True
     return srv

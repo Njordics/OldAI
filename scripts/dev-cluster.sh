@@ -56,7 +56,7 @@ fi
 "$BIN/aiclusterd$EXE" \
   --data-dir "$DEV/controller" \
   --nodeapi-listen 127.0.0.1:7443 --advertise https://127.0.0.1:7443 \
-  --mgmt-listen 127.0.0.1:8090 --gateway-listen 127.0.0.1:8080 \
+  --mgmt-listen 127.0.0.1:8090 --gateway-listen 127.0.0.1:18080 \
   --beacon-listen 127.0.0.1:47810 --beacon-targets 127.0.0.1:47811 \
   --provisioner tcp:127.0.0.1:7460 --registry-upstream "$REGISTRY" \
   --mdns=false --adoption-mode "$MODE" &
@@ -79,5 +79,5 @@ agent slave-2 7452 7454 --pairing
 
 echo "dev cluster running (mode=$MODE, models=$UPSTREAM)"
 echo "  dashboard  https://localhost:8090"
-echo "  API        http://localhost:8080/v1  (create a key under Connect)"
+echo "  API        http://localhost:18080/v1  (create a key under Connect; 18080 avoids clashing with other dev tools on 8080)"
 wait

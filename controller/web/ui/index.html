@@ -7,8 +7,10 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6fed'/%3E%3Ccircle cx='16' cy='16' r='4' fill='white'/%3E%3Ccircle cx='8' cy='9' r='2.5' fill='white'/%3E%3Ccircle cx='24' cy='9' r='2.5' fill='white'/%3E%3Ccircle cx='8' cy='23' r='2.5' fill='white'/%3E%3Ccircle cx='24' cy='23' r='2.5' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/ui/app.css">
   <script src="/ui/app.js" defer></script>
+  <script src="/ui/codekit.js" defer></script>
   <script src="/ui/models.js" defer></script>
   <script src="/ui/chat.js" defer></script>
+  <script src="/ui/code.js" defer></script>
   <script src="/ui/connect.js" defer></script>
 </head>
 <body>
@@ -53,6 +55,7 @@
         <a href="#nodes" data-tab="nodes">Nodes</a>
         <a href="#models" data-tab="models">Models</a>
         <a href="#chat" data-tab="chat">Chat</a>
+        <a href="#code" data-tab="code">Code</a>
         <a href="#connect" data-tab="connect">Connect</a>
         <a href="#settings" data-tab="settings">Settings</a>
       </nav>
@@ -125,6 +128,90 @@
         <button id="chat-send" class="btn btn-primary" type="submit">Send</button>
       </form>
       <p class="hint chat-hint">The playground goes through the same gateway as API clients. Answers come from the node shown under each reply.</p>
+    </section>
+
+    <!-- Code workspace -->
+    <section id="view-code" class="view view-code" hidden>
+      <div class="code-panes" role="group" aria-label="Show pane">
+        <button class="chip" type="button" data-pane="files" aria-pressed="false">Files</button>
+        <button class="chip" type="button" data-pane="editor" aria-pressed="true">Editor</button>
+        <button class="chip" type="button" data-pane="ai" aria-pressed="false">Assistant</button>
+      </div>
+      <div class="code-layout" id="code-layout" data-pane="editor">
+        <aside class="code-files" aria-label="Files">
+          <div class="cf-head">
+            <strong>Files</strong>
+            <span class="cf-actions">
+              <button class="btn btn-sm" type="button" id="code-new">New</button>
+              <label class="btn btn-sm btn-ghost" title="Upload text files">Upload<input type="file" id="code-upload" multiple hidden></label>
+            </span>
+          </div>
+          <ul id="code-filelist" class="filelist"></ul>
+          <a class="btn btn-sm btn-ghost cf-zip" href="/api/v1/workspace/zip" download>Download all (.zip)</a>
+        </aside>
+
+        <div class="code-main">
+          <div class="code-toolbar">
+            <span id="code-filename" class="mono code-filename">No file open</span>
+            <span id="code-status" class="muted code-status"></span>
+            <span class="spacer"></span>
+            <button class="btn btn-sm btn-ghost" type="button" id="code-rename">Rename</button>
+            <button class="btn btn-sm btn-ghost" type="button" id="code-delete">Delete</button>
+            <button class="btn btn-sm btn-primary" type="button" id="code-run" title="Run HTML/CSS/JavaScript in a sandbox (Ctrl+Enter)">Run ▸</button>
+          </div>
+          <div id="code-empty" class="code-empty" hidden>
+            <h2>Your workspace is empty</h2>
+            <p class="muted">Create a file, upload some, or start from a small web page you can run right here.</p>
+            <p><button class="btn btn-primary" type="button" id="code-sample">Start from a sample</button> <button class="btn" type="button" id="code-new2">New file</button></p>
+          </div>
+          <div id="code-editor" class="editor" hidden>
+            <div class="editor-scroll" id="editor-scroll">
+              <pre class="editor-gutter" id="editor-gutter" aria-hidden="true"></pre>
+              <div class="editor-body">
+                <pre class="editor-hl" aria-hidden="true"><code id="editor-hl"></code></pre>
+                <textarea id="editor-text" class="editor-text" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off" aria-label="Code editor. Press Escape, then Tab, to leave."></textarea>
+              </div>
+            </div>
+          </div>
+          <div id="code-review" class="code-review" hidden>
+            <div class="review-bar">
+              <strong id="review-title">Proposed change</strong>
+              <span class="spacer"></span>
+              <button class="btn btn-sm btn-ghost" type="button" id="review-reject">Reject</button>
+              <button class="btn btn-sm btn-primary" type="button" id="review-accept">Accept</button>
+            </div>
+            <div id="review-diff" class="review-diff"></div>
+          </div>
+          <div id="code-preview" class="code-preview" hidden>
+            <div class="pv-bar"><strong>Preview</strong><span class="muted pv-note">sandboxed: no network, no access to the dashboard</span><span class="spacer"></span>
+              <button class="btn btn-sm btn-ghost" type="button" id="pv-rerun">Run again</button>
+              <button class="btn btn-sm btn-ghost" type="button" id="pv-close">Close</button></div>
+            <div class="pv-body"><div id="pv-host" class="pv-host"></div><div id="pv-console" class="pv-console" aria-live="polite"></div></div>
+          </div>
+        </div>
+
+        <aside class="code-ai" aria-label="Coding assistant">
+          <div class="ai-head">
+            <label class="grow"><span class="sr-only">Model</span><select id="ai-model"></select></label>
+            <button class="btn btn-sm btn-ghost" type="button" id="ai-clear" title="Clear the conversation">Clear</button>
+          </div>
+          <div class="ai-quick" id="ai-quick">
+            <button class="chip" type="button" data-ai="explain">Explain</button>
+            <button class="chip" type="button" data-ai="fix">Fix bugs</button>
+            <button class="chip" type="button" data-ai="refactor">Refactor</button>
+            <button class="chip" type="button" data-ai="comment">Add comments</button>
+            <button class="chip" type="button" data-ai="tests">Write tests</button>
+          </div>
+          <div id="ai-log" class="ai-log" aria-live="polite"></div>
+          <form id="ai-form" class="ai-form">
+            <textarea id="ai-input" rows="3" placeholder="Ask about this file, or describe a change. Ctrl+Enter to send." aria-label="Message to the coding assistant"></textarea>
+            <div class="ai-form-row">
+              <span id="ai-scope" class="muted ai-scope"></span>
+              <button id="ai-send" class="btn btn-primary btn-sm" type="submit">Send</button>
+            </div>
+          </form>
+        </aside>
+      </div>
     </section>
 
     <!-- Connect -->

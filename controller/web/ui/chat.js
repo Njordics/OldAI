@@ -49,13 +49,23 @@ function renderChat() {
       <div class="msg-body"></div>
       ${m.role === "assistant" ? `<div class="msg-meta">${metaText(m)}</div>` : ""}
     </div>`).join("");
-  // Text, never HTML: model output must not be able to inject markup.
   log.querySelectorAll(".msg").forEach(el => {
     const m = chat.messages[+el.dataset.i];
-    el.querySelector(".msg-body").textContent = m.content || (m.role === "assistant" && !m.error && chat.controller ? "…" : "");
+    fillBody(el.querySelector(".msg-body"), m);
     if (m.error) el.classList.add("msg-error");
   });
   log.scrollTop = log.scrollHeight;
+}
+
+// User text is shown as typed; assistant replies render as Markdown through
+// codekit, which escapes everything, so model output can't inject markup.
+function fillBody(el, m) {
+  if (m.role === "assistant" && m.content) {
+    el.classList.add("md");
+    el.innerHTML = codekit.renderMarkdown(m.content);
+  } else {
+    el.textContent = m.content || (m.role === "assistant" && !m.error && chat.controller ? "…" : "");
+  }
 }
 
 function metaText(m) {
@@ -68,11 +78,18 @@ function metaText(m) {
   return parts.join(" · ");
 }
 
+// updateLast re-renders the streaming reply, at most once per frame.
+let lastFrame = 0;
 function updateLast() {
+  cancelAnimationFrame(lastFrame);
+  lastFrame = requestAnimationFrame(updateLastNow);
+}
+
+function updateLastNow() {
   const el = $("#chat-log .msg:last-child");
   const m = chat.messages[chat.messages.length - 1];
   if (!el || !m) return renderChat();
-  el.querySelector(".msg-body").textContent = m.content || "…";
+  fillBody(el.querySelector(".msg-body"), m);
   const meta = el.querySelector(".msg-meta");
   if (meta) meta.innerHTML = metaText(m);
   if (m.error) el.classList.add("msg-error");

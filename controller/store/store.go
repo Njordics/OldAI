@@ -122,6 +122,7 @@ var migrations = []string{
 		created_at INTEGER NOT NULL,
 		last_used_at INTEGER NOT NULL DEFAULT 0
 	)`,
+	`CREATE TABLE workspace_files (path TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
 }
 
 func Open(path string) (*Store, error) {
