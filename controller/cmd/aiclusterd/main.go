@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -33,6 +34,10 @@ func main() {
 	flag.StringVar(&beaconTargets, "beacon-targets", "", "comma-separated host:port beacon destinations (default: broadcast)")
 	flag.BoolVar(&cfg.MDNS, "mdns", true, "use mDNS discovery and announcement")
 	flag.StringVar(&cfg.DefaultAdoptionMode, "adoption-mode", "auto", "initial adoption mode: auto|approve (later changes are stored in the DB)")
+	flag.StringVar(&cfg.ProvisionerAddr, "provisioner", "unix:/run/aicluster/provisioner.sock", "provisioner address (unix:/path or tcp:host:port)")
+	flag.StringVar(&cfg.ModelDir, "model-dir", "", "model cache directory (default <data-dir>/models)")
+	flag.StringVar(&cfg.RegistryUpstream, "registry-upstream", "https://registry.ollama.ai", "where the Controller downloads models from")
+	flag.DurationVar(&cfg.ModelGCGrace, "model-gc-grace", 24*time.Hour, "how long Slaves keep unassigned models on disk")
 	flag.StringVar(&logLevel, "log-level", "info", "debug|info|warn|error")
 	flag.Parse()
 	if advertise != "" {

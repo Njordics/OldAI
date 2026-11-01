@@ -36,6 +36,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /api/v1/nodes/{id}/release", s.release)
 	api.HandleFunc("GET /api/v1/settings", s.getSettings)
 	api.HandleFunc("PUT /api/v1/settings", s.putSettings)
+	s.modelRoutes(api)
 
 	ui, _ := fs.Sub(uiFiles, "ui")
 	mux := http.NewServeMux()

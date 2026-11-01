@@ -40,10 +40,16 @@ func main() {
 	fs.StringVar(&cfg.ControllerBeaconListen, "controller-beacon-listen", ":47800", "address for receiving controller beacons (empty disables)")
 	fs.StringVar(&logLevel, "log-level", "info", "debug|info|warn|error")
 	fs.StringVar(&cfg.HWFingerprint, "hw-fingerprint", "", "override the hardware fingerprint (only for running several agents on one machine)")
+	fs.StringVar(&cfg.Runtime, "runtime", "ollama", "inference runtime: ollama | fake (dev: real pulls, no inference) | none")
+	fs.StringVar(&cfg.OllamaURL, "ollama-url", "http://127.0.0.1:11434", "local Ollama API")
+	fs.StringVar(&cfg.RegistryShimListen, "registry-shim-listen", "127.0.0.1:7452", "loopback address the runtime pulls models from")
+	var fakeMBps int64
+	fs.Int64Var(&fakeMBps, "fake-mbps", 0, "throttle the fake runtime's pulls (MB/s, 0 = unlimited)")
 	_ = fs.Parse(args)
 	if beaconTargets != "" {
 		cfg.BeaconTargets = strings.Split(beaconTargets, ",")
 	}
+	cfg.FakeBytesPerSec = fakeMBps << 20
 	if err := os.MkdirAll(cfg.ModelDir, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

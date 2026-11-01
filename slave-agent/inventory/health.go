@@ -16,6 +16,9 @@ func Health(modelDir string) proto.Health {
 		MemTotal: meminfo("MemTotal"),
 		MemAvail: meminfo("MemAvailable"),
 	}
+	if h.MemTotal == 0 {
+		h.MemTotal, h.MemAvail = platformMemory()
+	}
 	if f := strings.Fields(readTrim("proc/uptime")); len(f) > 0 {
 		up, _ := strconv.ParseFloat(f[0], 64)
 		h.UptimeS = int64(up)

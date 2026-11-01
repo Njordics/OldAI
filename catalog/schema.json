@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "aicluster model family",
+  "type": "object",
+  "required": ["id", "family", "license", "capabilities", "variants"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+    "family": { "type": "string" },
+    "description": { "type": "string" },
+    "license": {
+      "type": "object",
+      "required": ["spdx", "commercial_use"],
+      "additionalProperties": false,
+      "properties": {
+        "spdx": { "type": "string" },
+        "name": { "type": "string" },
+        "url": { "type": "string" },
+        "commercial_use": { "type": "boolean" }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "enum": ["chat", "code", "vision", "embeddings", "tools", "reasoning", "speech"] }
+    },
+    "priority": { "type": "integer" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "aliases": { "type": "object", "additionalProperties": { "type": "string" } },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "params_b", "sources"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]*$" },
+          "params_b": { "type": "number", "exclusiveMinimum": 0 },
+          "ctx_default": { "type": "integer", "minimum": 256 },
+          "arch": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "layers": { "type": "integer", "minimum": 1 },
+              "kv_heads": { "type": "integer", "minimum": 1 },
+              "head_dim": { "type": "integer", "minimum": 1 },
+              "ctx_max": { "type": "integer", "minimum": 256 }
+            }
+          },
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["runtime", "quants"],
+              "additionalProperties": false,
+              "properties": {
+                "runtime": { "enum": ["ollama", "llamacpp", "vllm", "whisper"] },
+                "quants": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "required": ["quant", "size"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "quant": { "type": "string" },
+                      "ref": { "type": "string" },
+                      "hf": { "type": "string" },
+                      "revision": { "type": "string" },
+                      "size": { "type": "integer", "minimum": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

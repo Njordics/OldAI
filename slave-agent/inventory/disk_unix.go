@@ -12,3 +12,6 @@ func diskUsage(dir string) (total, free uint64, ok bool) {
 	bs := uint64(st.Bsize)
 	return st.Blocks * bs, st.Bavail * bs, true
 }
+
+// platformMemory is the fallback when /proc/meminfo is missing (non-Linux Unix).
+func platformMemory() (total, avail uint64) { return 0, 0 }

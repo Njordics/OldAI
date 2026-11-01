@@ -7,6 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6fed'/%3E%3Ccircle cx='16' cy='16' r='4' fill='white'/%3E%3Ccircle cx='8' cy='9' r='2.5' fill='white'/%3E%3Ccircle cx='24' cy='9' r='2.5' fill='white'/%3E%3Ccircle cx='8' cy='23' r='2.5' fill='white'/%3E%3Ccircle cx='24' cy='23' r='2.5' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/ui/app.css">
   <script src="/ui/app.js" defer></script>
+  <script src="/ui/models.js" defer></script>
 </head>
 <body>
   <!-- Sign-in -->
@@ -48,6 +49,7 @@
       <div class="brand"><span class="brand-mark" aria-hidden="true"></span>AI Cluster</div>
       <nav class="tabs" aria-label="Sections">
         <a href="#nodes" data-tab="nodes">Nodes</a>
+        <a href="#models" data-tab="models">Models</a>
         <a href="#settings" data-tab="settings">Settings</a>
       </nav>
       <div class="topbar-right">
@@ -83,6 +85,23 @@
           <p>Install the Slave OS on a machine and plug it into this network. It appears here within a few seconds.</p>
         </div>
       </div>
+    </section>
+
+    <!-- Models -->
+    <section id="view-models" class="view" hidden>
+      <div class="toolbar">
+        <h1>Models on the cluster</h1>
+        <span id="models-summary" class="muted"></span>
+      </div>
+      <div id="installed" class="installed"></div>
+
+      <div class="toolbar catalog-toolbar">
+        <h1>Catalog</h1>
+        <div class="filters" id="cap-filters" role="group" aria-label="Filter by capability"></div>
+        <input id="catalog-search" class="search" type="search" placeholder="Search models" aria-label="Search catalog">
+      </div>
+      <div id="catalog-error" class="banner bad" hidden></div>
+      <div id="catalog" class="catalog"></div>
     </section>
 
     <!-- Settings -->
@@ -158,6 +177,49 @@
       <div class="dialog-actions">
         <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
         <button class="btn btn-danger" id="release-go" value="go" type="submit">Release</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Install dialog -->
+  <dialog id="install-dialog" class="dialog dialog-wide">
+    <form method="dialog" id="install-form">
+      <h2>Install <span id="install-name"></span></h2>
+      <p id="install-desc" class="muted"></p>
+      <label class="field">
+        <span>Quantization</span>
+        <select id="install-quant"></select>
+      </label>
+      <fieldset class="field">
+        <legend>Where</legend>
+        <label class="choice choice-sm"><input type="radio" name="where" value="auto" checked>
+          <span class="choice-body"><strong>Best node automatically</strong><span>Picks the node with the most room. <label class="inline">Copies <input id="install-replicas" type="number" min="1" max="64" value="1"></label></span></span>
+        </label>
+        <label class="choice choice-sm"><input type="radio" name="where" value="pick">
+          <span class="choice-body"><strong>Choose nodes</strong><span>Install on each node you tick.</span></span>
+        </label>
+      </fieldset>
+      <div id="install-nodes" class="node-picks"></div>
+      <label class="check"><input type="checkbox" id="install-resident" checked> Keep loaded in memory (fast first answer; uses its memory all the time)</label>
+      <p id="install-error" class="error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+        <button class="btn btn-primary" id="install-go" value="go" type="submit">Install</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Swap dialog -->
+  <dialog id="swap-dialog" class="dialog dialog-wide">
+    <form method="dialog" id="swap-form">
+      <h2>Swap model on <span id="swap-node"></span></h2>
+      <p class="muted">Replace <strong id="swap-from"></strong>. The old model is unloaded right away and stays on disk for a day in case you switch back.</p>
+      <input id="swap-search" class="search search-full" type="search" placeholder="Search models" aria-label="Search models to swap in">
+      <div id="swap-list" class="swap-list" role="listbox" aria-label="Models"></div>
+      <p id="swap-error" class="error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+        <button class="btn btn-primary" id="swap-go" value="go" type="submit" disabled>Swap</button>
       </div>
     </form>
   </dialog>

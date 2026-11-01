@@ -195,21 +195,26 @@ func (c *Core) Adopt(ctx context.Context, nodeID, code string, explicit bool) (e
 		return fmt.Errorf("sign: %w", err)
 	}
 
-	// 4. record intent, then complete
+	// 4. record intent, then complete. Choosing and saving the name happen
+	// under one lock so concurrent adoptions can't pick the same one.
+	c.nameMu.Lock()
 	name, err := c.uniqueName(ctx, pickName(n, hello.Inventory, matches), nodeID, matches)
 	if err != nil {
+		c.nameMu.Unlock()
 		return err
 	}
 	gen := n.DesiredGen + 1
-	desired := proto.DesiredState{V: proto.Version, Generation: gen, NodeName: name}
+	desired := proto.DesiredState{V: proto.Version, Generation: gen, NodeName: name, GCGraceS: int(c.cfg.ModelGCGrace / time.Second)}
 	desiredJSON, _ := json.Marshal(desired)
 	now := time.Now().UTC()
-	if _, err := c.Store.UpdateNode(ctx, nodeID, func(m *store.Node) error {
+	_, err = c.Store.UpdateNode(ctx, nodeID, func(m *store.Node) error {
 		setState(m, store.StateEnrolling, now)
 		m.Name, m.CertSerial, m.LastError = name, serial, ""
 		m.Desired, m.DesiredGen = desiredJSON, gen
 		return nil
-	}); err != nil {
+	})
+	c.nameMu.Unlock()
+	if err != nil {
 		return err
 	}
 	complete := proto.EnrollComplete{
@@ -233,9 +238,13 @@ func (c *Core) Adopt(ctx context.Context, nodeID, code string, explicit bool) (e
 			continue
 		}
 		_ = c.Store.Revoke(ctx, m.CertSerial, m.NodeID)
+		_ = c.Store.MoveAssignments(ctx, m.NodeID, nodeID)
 		_ = c.Store.DeleteNode(ctx, m.NodeID)
 		log.Info("merged reinstalled node record", "old_node_id", m.NodeID)
 	}
+	// Restores a reinstalled node's models; the node fetches the new
+	// generation with its first heartbeat.
+	c.SyncDesired(ctx, nodeID)
 	c.mu.Lock()
 	delete(c.backoff, nodeID)
 	c.mu.Unlock()
@@ -328,6 +337,9 @@ func (c *Core) Release(ctx context.Context, nodeID string, keepModels bool) erro
 		}
 	}
 	if err := c.Store.Revoke(ctx, n.CertSerial, nodeID); err != nil {
+		return err
+	}
+	if err := c.Store.DeleteNodeAssignments(ctx, nodeID); err != nil {
 		return err
 	}
 	_, err = c.Store.UpdateNode(ctx, nodeID, func(m *store.Node) error {

@@ -1,0 +1,32 @@
+id: deepseek-r1
+family: DeepSeek-R1 (distilled)
+description: Reasoning models distilled from DeepSeek-R1 into Qwen; think step by step before answering.
+license: { spdx: MIT, name: MIT, commercial_use: true }
+capabilities: [chat, reasoning]
+priority: 75
+variants:
+  - id: deepseek-r1:1.5b
+    params_b: 1.8
+    arch: { layers: 28, kv_heads: 2, head_dim: 128, ctx_max: 131072 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/deepseek-r1:1.5b-qwen-distill-q4_K_M", size: 1117320512 }
+  - id: deepseek-r1:7b
+    params_b: 7.6
+    arch: { layers: 28, kv_heads: 4, head_dim: 128, ctx_max: 131072 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/deepseek-r1:7b-qwen-distill-q4_K_M", size: 4683073184 }
+          - { quant: q8_0, ref: "library/deepseek-r1:7b-qwen-distill-q8_0", size: 8098525184 }
+  - id: deepseek-r1:14b
+    params_b: 14.8
+    arch: { layers: 48, kv_heads: 8, head_dim: 128, ctx_max: 131072 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/deepseek-r1:14b-qwen-distill-q4_K_M", size: 8988110304 }

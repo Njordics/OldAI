@@ -1,0 +1,22 @@
+[project]
+name = "aicluster-provisioner"
+version = "0.3.0"
+description = "Model catalog and placement engine for the aicluster Controller"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6"]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "jsonschema>=4"]
+
+[project.scripts]
+aicluster-provisioner = "aicluster_provisioner.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["aicluster_provisioner*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

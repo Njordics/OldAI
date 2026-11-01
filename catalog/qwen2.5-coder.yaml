@@ -1,0 +1,25 @@
+id: qwen2.5-coder
+family: Qwen 2.5 Coder
+description: Qwen tuned for code generation, completion and repair.
+license: { spdx: Apache-2.0, name: Apache 2.0, commercial_use: true }
+capabilities: [code, chat]
+priority: 80
+variants:
+  - id: qwen2.5-coder:1.5b
+    params_b: 1.5
+    arch: { layers: 28, kv_heads: 2, head_dim: 128, ctx_max: 32768 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/qwen2.5-coder:1.5b-instruct-q4_K_M", size: 986061856 }
+  - id: qwen2.5-coder:7b
+    params_b: 7.6
+    arch: { layers: 28, kv_heads: 4, head_dim: 128, ctx_max: 32768 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/qwen2.5-coder:7b-instruct-q4_K_M", size: 4683087232 }
+          - { quant: q8_0, ref: "library/qwen2.5-coder:7b-instruct-q8_0", size: 8098525184 }
+aliases: { coder: "qwen2.5-coder:7b" }

@@ -168,15 +168,71 @@ type OK struct {
 }
 
 // DesiredState is the Controller's declaration of what a Slave should run
-// (§5.1). Fields for drivers, runtimes and models arrive in later build steps;
-// unknown fields are preserved as raw JSON by the agent.
+// (§5.1). Driver and OS fields arrive in later build steps.
 type DesiredState struct {
-	V            int    `json:"v"`
-	Generation   int64  `json:"generation"`
-	NodeName     string `json:"node_name"`
-	AllowReboot  bool   `json:"allow_reboot"`
-	GCGraceS     int    `json:"gc_grace_s,omitempty"`
-	AgentVersion string `json:"agent_version,omitempty"`
+	V            int            `json:"v"`
+	Generation   int64          `json:"generation"`
+	NodeName     string         `json:"node_name"`
+	AllowReboot  bool           `json:"allow_reboot"`
+	GCGraceS     int            `json:"gc_grace_s,omitempty"`
+	AgentVersion string         `json:"agent_version,omitempty"`
+	Runtimes     []RuntimeSpec  `json:"runtimes,omitempty"`
+	Models       []DesiredModel `json:"models,omitempty"`
+}
+
+type RuntimeSpec struct {
+	Kind    string            `json:"kind"` // ollama | llamacpp | vllm | whisper
+	Version string            `json:"version,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+// DesiredModel is one model a node should hold. AssignmentID ties the
+// agent's progress reports back to the Controller's assignment.
+type DesiredModel struct {
+	AssignmentID string      `json:"assignment_id"`
+	ModelID      string      `json:"model_id"`
+	Variant      string      `json:"variant"` // quantisation, e.g. q4_K_M
+	Runtime      string      `json:"runtime"`
+	Source       ModelSource `json:"source"`
+	Residency    string      `json:"residency"` // resident | on_demand
+	Ctx          int         `json:"ctx,omitempty"`
+	Size         int64       `json:"size,omitempty"`
+}
+
+type ModelSource struct {
+	Type   string `json:"type"` // "ollama" (OCI pull through the Controller) | "blob"
+	Ref    string `json:"ref,omitempty"`
+	Digest string `json:"digest,omitempty"`
+	Path   string `json:"path,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
+const (
+	ResidencyResident = "resident"
+	ResidencyOnDemand = "on_demand"
+)
+
+// Model states reported by the agent.
+const (
+	ModelPending     = "pending"
+	ModelDownloading = "downloading"
+	ModelInstalled   = "installed"
+	ModelLoading     = "loading"
+	ModelLoaded      = "loaded"
+	ModelFailed      = "failed"
+)
+
+type ObservedModel struct {
+	AssignmentID string  `json:"assignment_id"`
+	ModelID      string  `json:"model_id"`
+	Variant      string  `json:"variant"`
+	Runtime      string  `json:"runtime"`
+	LocalName    string  `json:"local_name,omitempty"` // the runtime's name for it
+	State        string  `json:"state"`
+	Progress     float64 `json:"progress"`
+	BytesDone    int64   `json:"bytes_done"`
+	BytesTotal   int64   `json:"bytes_total"`
+	Error        string  `json:"error,omitempty"`
 }
 
 type AcceptedGeneration struct {
@@ -199,6 +255,7 @@ type ObservedState struct {
 	RebootRequired     bool              `json:"reboot_required"`
 	Conditions         []Condition       `json:"conditions"`
 	Versions           map[string]string `json:"versions"`
+	Models             []ObservedModel   `json:"models"`
 }
 
 const (

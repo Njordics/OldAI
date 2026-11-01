@@ -111,6 +111,7 @@ func (a *Agent) applyDesired(ds proto.DesiredState) bool {
 		a.log.Info("desired state updated", "generation", ds.Generation)
 	}
 	a.desired = ds
+	a.signalDesiredLocked()
 	if ds.NodeName != "" {
 		a.adopted.NodeName = ds.NodeName
 	}
@@ -125,16 +126,22 @@ func (a *Agent) handleObserved(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, a.observed())
 }
 
-// observed reports the reconcile result. Step 2 has nothing to reconcile yet,
-// so every accepted generation is immediately "ready".
+// observed reports the reconcile result: the generation the agent has
+// accepted, and how far its models are.
 func (a *Agent) observed() *proto.ObservedState {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	models, phase, conds := a.modelObservationsLocked()
+	versions := map[string]string{"agent": a.cfg.Version, "kernel": a.inv.Host.Kernel, "os": a.inv.Host.OS}
+	if a.rt != nil {
+		versions["runtime"] = a.rt.Kind()
+	}
 	return &proto.ObservedState{
 		ObservedGeneration: a.desired.Generation,
-		Phase:              proto.PhaseReady,
-		Conditions:         []proto.Condition{},
-		Versions:           map[string]string{"agent": a.cfg.Version, "kernel": a.inv.Host.Kernel, "os": a.inv.Host.OS},
+		Phase:              phase,
+		Conditions:         conds,
+		Versions:           versions,
+		Models:             models,
 	}
 }
 
@@ -146,7 +153,7 @@ func (a *Agent) handleRelease(w http.ResponseWriter, r *http.Request) {
 	// Run after the response is flushed: release tears down this mTLS identity.
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		if err := a.release("released by controller", false); err != nil {
+		if err := a.release("released by controller", false, req.KeepModels); err != nil {
 			a.jobs.finish(job.JobID, err)
 			return
 		}

@@ -53,11 +53,11 @@ type ctrl struct {
 	stop       func()
 }
 
-func startController(t *testing.T, mode string) *ctrl {
+func startController(t *testing.T, mode string, opts ...func(*core.Config)) *ctrl {
 	t.Helper()
 	nodePort := freeTCP(t)
 	beacon := "127.0.0.1:" + strconv.Itoa(freeUDP(t))
-	c, err := core.New(core.Config{
+	cfg := core.Config{
 		DataDir:             filepath.Join(t.TempDir(), "controller"),
 		NodeAPIListen:       "127.0.0.1:" + strconv.Itoa(nodePort),
 		Advertise:           []string{"https://127.0.0.1:" + strconv.Itoa(nodePort)},
@@ -67,7 +67,13 @@ func startController(t *testing.T, mode string) *ctrl {
 		HeartbeatInterval:   time.Second,
 		EnrollTimeout:       10 * time.Second,
 		MonitorEvery:        100 * time.Millisecond,
-	}, logger("controller"))
+		ProvisionerAddr:     provisionerAddr,
+		RegistryUpstream:    registryURL,
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	c, err := core.New(cfg, logger("controller"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +115,10 @@ func startSlave(t *testing.T, c *ctrl, opts ...slaveOpt) *slave {
 		AdoptedBeaconEvery:   time.Second,
 		PairingCodeFile:      filepath.Join(dir, "pairing-code"),
 		HWFingerprint:        "hw-" + filepath.Base(dir),
+		ModelDir:             filepath.Join(dir, "models"),
+		Runtime:              "fake",
+		RegistryShimListen:   "127.0.0.1:0",
+		ReconcileEvery:       300 * time.Millisecond,
 	}
 	for _, o := range opts {
 		o(&cfg)

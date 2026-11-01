@@ -25,6 +25,8 @@ import (
 	"aicluster/common/discovery"
 	"aicluster/common/pki"
 	"aicluster/common/proto"
+	"aicluster/controller/modelcache"
+	"aicluster/controller/provision"
 	"aicluster/controller/store"
 )
 
@@ -53,6 +55,15 @@ type Config struct {
 	MonitorEvery        time.Duration
 	ControllerBeacon    time.Duration
 	Version             string
+
+	// ProvisionerAddr is "unix:/run/aicluster/provisioner.sock" or "tcp:host:port".
+	ProvisionerAddr string
+	// ModelDir holds the model cache (default DataDir/models).
+	ModelDir string
+	// RegistryUpstream is where models come from (default registry.ollama.ai).
+	RegistryUpstream string
+	// ModelGCGrace is how long a Slave keeps an unassigned model on disk.
+	ModelGCGrace time.Duration
 }
 
 func (c *Config) defaults() {
@@ -80,6 +91,15 @@ func (c *Config) defaults() {
 	if c.ControllerBeacon == 0 {
 		c.ControllerBeacon = 30 * time.Second
 	}
+	if c.ProvisionerAddr == "" {
+		c.ProvisionerAddr = "unix:/run/aicluster/provisioner.sock"
+	}
+	if c.ModelDir == "" {
+		c.ModelDir = filepath.Join(c.DataDir, "models")
+	}
+	if c.ModelGCGrace == 0 {
+		c.ModelGCGrace = 24 * time.Hour
+	}
 }
 
 type Core struct {
@@ -95,8 +115,12 @@ type Core struct {
 	nodeLn    net.Listener
 	endpoints []string
 
+	Prov   *provision.Client
+	Models *modelcache.Cache
+
 	mu       sync.Mutex
 	mode     string
+	nameMu   sync.Mutex         // serialises node-name allocation
 	inflight map[string]bool    // node IDs with an adoption or probe running
 	backoff  map[string]backoff // auto-adoption retry schedule
 }
@@ -131,6 +155,13 @@ func New(cfg Config, log *slog.Logger) (*Core, error) {
 	if c.mode, err = st.Setting(ctx, "adoption_mode", cfg.DefaultAdoptionMode); err != nil {
 		return nil, err
 	}
+	if c.Prov, err = provision.New(cfg.ProvisionerAddr); err != nil {
+		return nil, err
+	}
+	if c.Models, err = modelcache.New(cfg.ModelDir, cfg.RegistryUpstream, log.With("component", "modelcache")); err != nil {
+		return nil, fmt.Errorf("model cache: %w", err)
+	}
+	c.Models.OnReady = c.onModelCached
 	if err := c.loadPKI(); err != nil {
 		return nil, fmt.Errorf("pki: %w", err)
 	}
@@ -269,6 +300,7 @@ func (c *Core) Run(ctx context.Context) error {
 		}
 	}
 	c.log.Info("controller core starting", "cluster_id", c.ClusterID, "mode", c.Mode(), "endpoints", c.endpoints)
+	c.ensureAssignedCached(ctx)
 	var wg sync.WaitGroup
 	for _, loop := range []func(context.Context){c.discoveryLoop, c.announceLoop, c.monitorLoop} {
 		wg.Add(1)

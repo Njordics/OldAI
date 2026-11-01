@@ -37,6 +37,8 @@ func (c *Core) serveNodeAPI(ctx context.Context) error {
 	mux.Handle("GET /v1/nodes/{id}/desired-state", c.nodeOnly(c.handleGetDesired))
 	mux.Handle("POST /v1/nodes/{id}/renew", c.nodeOnly(c.handleRenew))
 	mux.Handle("POST /v1/nodes/{id}/events", c.nodeOnly(c.handleEvent))
+	// Read-only model registry backed by the Controller's cache (§8).
+	mux.Handle("GET /v2/", c.anyNode(c.Models))
 
 	srv := &http.Server{
 		Handler:           mux,
@@ -79,6 +81,23 @@ func (c *Core) nodeOnly(h func(w http.ResponseWriter, r *http.Request, leaf *x50
 			return
 		}
 		h(w, r, leaf)
+	})
+}
+
+// anyNode admits any adopted, unrevoked node (used for shared resources
+// such as the model registry).
+func (c *Core) anyNode(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+			httpx.WriteError(w, http.StatusForbidden, proto.ErrForbidden, "client certificate required")
+			return
+		}
+		revoked, err := c.Store.IsRevoked(r.Context(), pki.SerialString(r.TLS.PeerCertificates[0].SerialNumber))
+		if err != nil || revoked {
+			httpx.WriteError(w, http.StatusForbidden, proto.ErrRevoked, "certificate revoked")
+			return
+		}
+		h.ServeHTTP(w, r)
 	})
 }
 

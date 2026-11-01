@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"aicluster/common/pki"
 	"aicluster/common/proto"
 	"aicluster/slave-agent/inventory"
+	"aicluster/slave-agent/runtime"
 )
 
 // Config is the agent's local configuration. Everything else comes from the
@@ -44,6 +46,17 @@ type Config struct {
 	// UnadoptedBeaconEvery / AdoptedBeaconEvery default to 5 s / 30 s.
 	UnadoptedBeaconEvery time.Duration
 	AdoptedBeaconEvery   time.Duration
+
+	// Runtime is "ollama" (default), "fake" (dev/tests: real pulls, no
+	// inference) or "none".
+	Runtime   string
+	OllamaURL string
+	// FakeBytesPerSec slows the fake runtime's pulls so progress is visible.
+	FakeBytesPerSec int64
+	// RegistryShimListen is the loopback address the runtime pulls from.
+	RegistryShimListen string
+	// ReconcileEvery is the model reconcile period (default 15 s).
+	ReconcileEvery time.Duration
 }
 
 func (c *Config) defaults() {
@@ -64,6 +77,18 @@ func (c *Config) defaults() {
 	}
 	if c.PairingCodeFile == "" {
 		c.PairingCodeFile = "/run/aicluster/" + filePairingCode
+	}
+	if c.Runtime == "" {
+		c.Runtime = "ollama"
+	}
+	if c.OllamaURL == "" {
+		c.OllamaURL = "http://127.0.0.1:11434"
+	}
+	if c.RegistryShimListen == "" {
+		c.RegistryShimListen = "127.0.0.1:7452"
+	}
+	if c.ReconcileEvery == 0 {
+		c.ReconcileEvery = 15 * time.Second
 	}
 }
 
@@ -86,24 +111,48 @@ type Agent struct {
 	pairing     pairingState
 	seq         uint64
 	lastObsSent time.Time
-	lastObsGen  int64
+	lastObs     string
+	models      modelTracker
+	desiredC    chan struct{} // closed and replaced on every desired-state change
 
 	jobs   *jobs
 	wakeHB chan struct{} // nudges the heartbeat loop (adoption, desired change)
 	stateC chan struct{} // nudges the announcer (state change)
+
+	rt         runtime.Runtime
+	reconcileC chan struct{}
+	shimLn     net.Listener
+	shimMu     sync.Mutex
+	shimHTTP   *http.Client
+	shimFor    *adopted
 }
 
 func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	cfg.defaults()
 	a := &Agent{
-		cfg:    cfg,
-		log:    log,
-		jobs:   newJobs(),
-		wakeHB: make(chan struct{}, 1),
-		stateC: make(chan struct{}, 1),
+		cfg:        cfg,
+		log:        log,
+		jobs:       newJobs(),
+		wakeHB:     make(chan struct{}, 1),
+		stateC:     make(chan struct{}, 1),
+		reconcileC: make(chan struct{}, 1),
+		desiredC:   make(chan struct{}),
+		models:     newModelTracker(),
 	}
 	if err := a.loadOrInit(); err != nil {
 		return nil, err
+	}
+	a.loadManaged()
+	switch cfg.Runtime {
+	case "ollama":
+		a.rt = runtime.NewOllama(cfg.OllamaURL)
+	case "fake":
+		f := runtime.NewFake(cfg.ModelDir)
+		f.BytesPerSec = cfg.FakeBytesPerSec
+		a.rt = f
+	case "none":
+	default:
+		return nil, fmt.Errorf("unknown runtime %q", cfg.Runtime)
 	}
 	a.refreshInventory()
 	if cfg.Pairing {
@@ -149,6 +198,9 @@ func (a *Agent) stateLocked() string {
 
 func (a *Agent) Port() int { return a.port }
 
+// Runtime exposes the model runtime (tests inspect the fake one).
+func (a *Agent) Runtime() runtime.Runtime { return a.rt }
+
 func (a *Agent) PairingCode() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -181,6 +233,11 @@ func (a *Agent) Run(ctx context.Context) error {
 			return err
 		}
 	}
+	if a.shimLn == nil {
+		if err := a.listenShim(); err != nil {
+			return fmt.Errorf("registry shim: %w", err)
+		}
+	}
 	a.log.Info("agent starting", "node_id", a.NodeID(), "state", a.State(), "port", a.port, "version", a.cfg.Version)
 
 	srv := &http.Server{
@@ -191,7 +248,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	tlsLn := tls.NewListener(a.ln, a.serverTLS())
 
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator} {
+	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator, a.serveShim, a.modelLoop} {
 		wg.Add(1)
 		go func() { defer wg.Done(); loop(ctx) }()
 	}
@@ -240,15 +297,20 @@ func (a *Agent) serverTLS() *tls.Config {
 	}
 }
 
-// release returns the node to the unadopted state (§5.5). keepModels is
-// honoured once models exist (build step 3).
-func (a *Agent) release(reason string, newIdentity bool) error {
+// release returns the node to the unadopted state (§5.5).
+func (a *Agent) release(reason string, newIdentity, keepModels bool) error {
+	if !keepModels {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		a.removeAllModels(ctx)
+		cancel()
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.log.Warn("releasing node", "reason", reason, "new_identity", newIdentity)
 	a.wipeAdoption()
 	a.adopted = nil
 	a.desired = proto.DesiredState{}
+	a.signalDesiredLocked()
 	a.enroll = enrollState{}
 	if newIdentity {
 		_ = os.Remove(a.file(fileIdentity))
@@ -275,9 +337,19 @@ func (a *Agent) loadOrInitIdentityLocked() error {
 // node_id, without needing the Controller.
 func FactoryReset(cfg Config, log *slog.Logger) error {
 	cfg.defaults()
-	a := &Agent{cfg: cfg, log: log, jobs: newJobs(), wakeHB: make(chan struct{}, 1), stateC: make(chan struct{}, 1)}
+	a := &Agent{cfg: cfg, log: log, jobs: newJobs(), wakeHB: make(chan struct{}, 1), stateC: make(chan struct{}, 1),
+		reconcileC: make(chan struct{}, 1), desiredC: make(chan struct{}), models: newModelTracker()}
 	if err := a.loadOrInit(); err != nil {
 		return err
 	}
-	return a.release("factory reset from console", true)
+	// Models stay on disk: the runtime may not be running at the console.
+	return a.release("factory reset from console", true, true)
+}
+
+// signalDesiredLocked wakes everything waiting on a desired-state change.
+// Caller holds a.mu.
+func (a *Agent) signalDesiredLocked() {
+	close(a.desiredC)
+	a.desiredC = make(chan struct{})
+	nudge(a.reconcileC)
 }

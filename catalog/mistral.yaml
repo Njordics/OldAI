@@ -1,0 +1,16 @@
+id: mistral
+family: Mistral 7B
+description: Mistral AI's fast 7B instruct model.
+license: { spdx: Apache-2.0, name: Apache 2.0, commercial_use: true }
+capabilities: [chat, tools]
+priority: 70
+variants:
+  - id: mistral:7b
+    params_b: 7.2
+    arch: { layers: 32, kv_heads: 8, head_dim: 128, ctx_max: 32768 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/mistral:7b-instruct-q4_K_M", size: 4372824384 }
+          - { quant: q8_0, ref: "library/mistral:7b-instruct-q8_0", size: 7695857984 }

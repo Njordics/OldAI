@@ -286,6 +286,7 @@ func (a *Agent) handleComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	a.adopted = loaded
 	a.desired = req.DesiredState
+	a.signalDesiredLocked()
 	_ = a.writeJSON(fileDesired, a.desired, 0o644)
 	a.enroll = enrollState{}
 	if a.cfg.Pairing {

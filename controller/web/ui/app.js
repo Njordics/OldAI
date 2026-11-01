@@ -5,6 +5,14 @@
 const POLL_MS = 2000;
 const $ = (sel, root = document) => root.querySelector(sel);
 
+// Extension points for the other dashboard scripts (models.js).
+const hooks = {
+  refresh: [], // async () => void, run on every poll
+  drawer: [],  // (node) => html, extra sections in the node drawer
+  wire: [],    // () => void, once at startup
+};
+const VIEWS = ["nodes", "models", "settings"];
+
 const state = {
   nodes: [],
   filter: "all",
@@ -331,6 +339,7 @@ function renderDrawer() {
       [c.type, `${c.status ? "✓" : "✗"} ${esc(c.reason || "")}`]))}</div>`);
   }
 
+  for (const f of hooks.drawer) parts.push(f(n));
   parts.push(`<details class="raw"><summary>Raw record</summary><pre>${esc(JSON.stringify(n, null, 2))}</pre></details>`);
   morph($("#drawer-body"), parts.join(""));
 }
@@ -491,6 +500,7 @@ async function refresh() {
     const [nodes, cluster] = await Promise.all([api("GET", "/api/v1/nodes"), api("GET", "/api/v1/cluster")]);
     state.nodes = nodes;
     state.cluster = cluster;
+    await Promise.all(hooks.refresh.map(f => f()));
     $("#conn").className = "conn";
     $("#conn").title = "Connected";
     renderNodes();
@@ -515,8 +525,8 @@ function stopPolling() {
 
 function route() {
   const tab = location.hash.replace("#", "") || "nodes";
-  const known = ["nodes", "settings"].includes(tab) ? tab : "nodes";
-  for (const v of ["nodes", "settings"]) $(`#view-${v}`).hidden = v !== known;
+  const known = VIEWS.includes(tab) ? tab : "nodes";
+  for (const v of VIEWS) $(`#view-${v}`).hidden = v !== known;
   for (const a of document.querySelectorAll(".tabs a")) {
     if (a.dataset.tab === known) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
@@ -579,10 +589,7 @@ function wire() {
     const act = e.target.closest("[data-act]");
     if (act) {
       e.stopPropagation();
-      const id = act.dataset.id;
-      if (act.dataset.act === "adopt") openAdopt(id);
-      else if (act.dataset.act === "release") openRelease(id);
-      else if (act.dataset.act === "details") openDrawer(id);
+      actions[act.dataset.act]?.(act.dataset.id, act);
       return;
     }
     const chip = e.target.closest("[data-filter]");
@@ -623,8 +630,16 @@ function wire() {
   document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("#app").hidden) refresh(); });
 }
 
+// Buttons carry data-act="<name>" data-id="<id>"; other scripts add entries.
+const actions = {
+  adopt: id => openAdopt(id),
+  release: id => openRelease(id),
+  details: id => openDrawer(id),
+};
+
 async function boot() {
   wire();
+  for (const f of hooks.wire ?? []) f();
   try {
     await api("GET", "/api/v1/cluster");
     await showApp();
@@ -633,4 +648,6 @@ async function boot() {
   }
 }
 
-boot();
+// Deferred scripts all run before DOMContentLoaded, so models.js has
+// registered its hooks by the time boot() starts.
+document.addEventListener("DOMContentLoaded", boot);

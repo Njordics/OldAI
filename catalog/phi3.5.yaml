@@ -1,0 +1,16 @@
+id: phi3.5
+family: Phi-3.5 Mini
+description: Microsoft's small model with a long context window.
+license: { spdx: MIT, name: MIT, commercial_use: true }
+capabilities: [chat]
+priority: 55
+variants:
+  - id: phi3.5:3.8b
+    params_b: 3.8
+    arch: { layers: 32, kv_heads: 32, head_dim: 96, ctx_max: 131072 }
+    ctx_default: 4096
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/phi3.5:3.8b-mini-instruct-q4_K_M", size: 2393232608 }
+          - { quant: q8_0, ref: "library/phi3.5:3.8b-mini-instruct-q8_0", size: 4061222400 }

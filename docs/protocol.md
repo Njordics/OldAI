@@ -437,9 +437,13 @@ GET    /api/v1/nodes                        GET  /api/v1/nodes/{id}
 POST   /api/v1/nodes/{id}/adopt   {pairing_code?}
 POST   /api/v1/nodes/{id}/release {keep_models}
 POST   /api/v1/nodes/{id}/drain | /undrain | /reboot
-GET    /api/v1/models                       GET  /api/v1/catalog
-POST   /api/v1/assignments  {node_id, model_id, variant?, residency}
-DELETE /api/v1/assignments/{id}
+GET    /api/v1/catalog                      catalog + fit of every model on every adopted node + Controller cache state
+GET    /api/v1/models                       every assignment with live state (fetching → downloading → loaded) and progress
+POST   /api/v1/models/install  {model_id, quant?, nodes?[] | replicas?, residency?}   all-or-nothing; 409 does_not_fit with reasons
+POST   /api/v1/assignments/{id}/swap  {model_id, quant?}   replace in one step; the old model's memory counts as free
+GET    /api/v1/assignments/{id}/swap-options               fit of every model on that node with the old one removed
+POST   /api/v1/assignments/{id}/retry                      restart a failed Controller download
+DELETE /api/v1/assignments/{id}                            unload now, delete from the node's disk after gc_grace_s
 GET    /api/v1/policy        PUT  /api/v1/policy
 POST   /api/v1/plan?dry_run=1
 POST   /api/v1/rollouts  {target: agent|runtime|os, version, max_unavailable}

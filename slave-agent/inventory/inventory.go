@@ -40,7 +40,7 @@ func Collect(modelDir string) *proto.Inventory {
 		CollectedAt: time.Now().UTC(),
 		Host:        host(),
 		CPU:         cpu(),
-		Memory:      proto.MemoryInfo{Total: meminfo("MemTotal")},
+		Memory:      proto.MemoryInfo{Total: memTotal()},
 		GPUs:        pciGPUs(),
 		Network:     network(),
 	}
@@ -246,4 +246,12 @@ func GPUSummary(inv *proto.Inventory) string {
 		return s + strconv.FormatUint(g.VRAM>>30, 10) + "G"
 	}
 	return s + "?"
+}
+
+func memTotal() uint64 {
+	if t := meminfo("MemTotal"); t > 0 {
+		return t
+	}
+	t, _ := platformMemory()
+	return t
 }

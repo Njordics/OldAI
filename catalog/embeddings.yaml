@@ -1,0 +1,29 @@
+id: embeddings
+family: Embedding models
+description: Turn text into vectors for search and retrieval (/v1/embeddings).
+license: { spdx: Apache-2.0, name: Apache 2.0, commercial_use: true }
+capabilities: [embeddings]
+priority: 70
+variants:
+  - id: all-minilm:22m
+    params_b: 0.023
+    ctx_default: 512
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: f16, ref: "library/all-minilm:22m", size: 45960996 }
+  - id: nomic-embed-text:v1.5
+    params_b: 0.137
+    ctx_default: 2048
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: f16, ref: "library/nomic-embed-text:v1.5", size: 274302450 }
+  - id: mxbai-embed-large:335m
+    params_b: 0.335
+    ctx_default: 512
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: f16, ref: "library/mxbai-embed-large:335m", size: 669615493 }
+aliases: { embed: "nomic-embed-text:v1.5" }

@@ -1,0 +1,15 @@
+id: llava
+family: LLaVA
+description: Vision-language model; describe and answer questions about images.
+license: { spdx: Apache-2.0, name: Apache 2.0, commercial_use: true }
+capabilities: [vision, chat]
+priority: 60
+variants:
+  - id: llava:7b
+    params_b: 7.2
+    arch: { layers: 32, kv_heads: 8, head_dim: 128, ctx_max: 32768 }
+    ctx_default: 4096
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_0, ref: "library/llava:7b", size: 4733363377 }

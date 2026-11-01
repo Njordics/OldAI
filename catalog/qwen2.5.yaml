@@ -1,0 +1,62 @@
+id: qwen2.5
+family: Qwen 2.5
+description: Alibaba's general-purpose chat models; strong multilingual and tool use at every size.
+license: { spdx: Apache-2.0, name: Apache 2.0, commercial_use: true }
+capabilities: [chat, tools]
+priority: 90
+variants:
+  - id: qwen2.5:0.5b
+    params_b: 0.5
+    arch: { layers: 24, kv_heads: 2, head_dim: 64, ctx_max: 32768 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/qwen2.5:0.5b-instruct-q4_K_M", size: 397807936 }
+          - { quant: q8_0, ref: "library/qwen2.5:0.5b-instruct-q8_0", size: 531068288 }
+  - id: qwen2.5:1.5b
+    params_b: 1.5
+    arch: { layers: 28, kv_heads: 2, head_dim: 128, ctx_max: 32768 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/qwen2.5:1.5b-instruct-q4_K_M", size: 986048000 }
+          - { quant: q8_0, ref: "library/qwen2.5:1.5b-instruct-q8_0", size: 1646000000 }
+  - id: qwen2.5:3b
+    params_b: 3.1
+    arch: { layers: 36, kv_heads: 2, head_dim: 128, ctx_max: 32768 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/qwen2.5:3b-instruct-q4_K_M", size: 1929000000 }
+          - { quant: q8_0, ref: "library/qwen2.5:3b-instruct-q8_0", size: 3285000000 }
+  - id: qwen2.5:7b
+    params_b: 7.6
+    arch: { layers: 28, kv_heads: 4, head_dim: 128, ctx_max: 32768 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/qwen2.5:7b-instruct-q4_K_M", size: 4683087232 }
+          - { quant: q5_K_M, ref: "library/qwen2.5:7b-instruct-q5_K_M", size: 5444831744 }
+          - { quant: q8_0, ref: "library/qwen2.5:7b-instruct-q8_0", size: 8098525184 }
+  - id: qwen2.5:14b
+    params_b: 14.8
+    arch: { layers: 48, kv_heads: 8, head_dim: 128, ctx_max: 32768 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/qwen2.5:14b-instruct-q4_K_M", size: 8988110304 }
+          - { quant: q8_0, ref: "library/qwen2.5:14b-instruct-q8_0", size: 15701597024 }
+  - id: qwen2.5:32b
+    params_b: 32.8
+    arch: { layers: 64, kv_heads: 8, head_dim: 128, ctx_max: 32768 }
+    ctx_default: 8192
+    sources:
+      - runtime: ollama
+        quants:
+          - { quant: q4_K_M, ref: "library/qwen2.5:32b-instruct-q4_K_M", size: 19851336256 }
+aliases: { qwen: "qwen2.5:7b" }

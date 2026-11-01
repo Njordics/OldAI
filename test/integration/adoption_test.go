@@ -30,10 +30,12 @@ func TestAutoAdoptOfflineAndReturn(t *testing.T) {
 	s2 := startSlave(t, c)
 
 	for _, s := range []*slave{s1, s2} {
-		n := c.waitState(t, s.NodeID(), store.StateAdopted, adoptTimeout)
-		if n.Phase != proto.PhaseReady || n.ObservedGen != n.DesiredGen || n.DesiredGen == 0 {
-			t.Fatalf("node not converged: phase=%q observed=%d desired=%d", n.Phase, n.ObservedGen, n.DesiredGen)
-		}
+		c.waitState(t, s.NodeID(), store.StateAdopted, adoptTimeout)
+		var n *store.Node
+		waitFor(t, 5*time.Second, "node to converge", func() bool {
+			n = c.node(t, s.NodeID())
+			return n.Phase == proto.PhaseReady && n.ObservedGen == n.DesiredGen && n.DesiredGen > 0
+		})
 		if s.State() != proto.AgentAdopted {
 			t.Fatalf("agent state = %s", s.State())
 		}

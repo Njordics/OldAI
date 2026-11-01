@@ -88,11 +88,16 @@ func (a *Agent) heartbeatOnce(ctx context.Context, client *http.Client, ad *adop
 		Addrs:  discovery.LocalIPv4s(),
 		Health: inventory.Health(a.cfg.ModelDir),
 	}
-	sendObs := a.desired.Generation != a.lastObsGen || time.Since(a.lastObsSent) > observedRefresh
 	nodeID := a.nodeID
+	lastObs, lastSent := a.lastObs, a.lastObsSent
 	a.mu.Unlock()
+	// Observed state rides along when it changed (including download
+	// progress) and at least every observedRefresh.
+	obs := a.observed()
+	obsJSON := observedJSON(obs)
+	sendObs := obsJSON != lastObs || time.Since(lastSent) > observedRefresh
 	if sendObs {
-		hb.Observed = a.observed()
+		hb.Observed = obs
 	}
 
 	var resp proto.HeartbeatResp
@@ -102,7 +107,7 @@ func (a *Agent) heartbeatOnce(ctx context.Context, client *http.Client, ad *adop
 	if err != nil {
 		if httpx.Code(err) == proto.ErrRevoked {
 			// The Controller released us while we were away (§5.5).
-			if rerr := a.release("certificate revoked by controller", false); rerr != nil {
+			if rerr := a.release("certificate revoked by controller", false, true); rerr != nil {
 				a.log.Error("release after revocation failed", "err", rerr)
 			}
 			return
@@ -112,7 +117,7 @@ func (a *Agent) heartbeatOnce(ctx context.Context, client *http.Client, ad *adop
 	}
 	if sendObs {
 		a.mu.Lock()
-		a.lastObsSent, a.lastObsGen = time.Now(), hb.Observed.ObservedGeneration
+		a.lastObsSent, a.lastObs = time.Now(), obsJSON
 		a.mu.Unlock()
 	}
 	a.applyHeartbeatResp(ctx, client, ad, ep, resp)

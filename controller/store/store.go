@@ -96,6 +96,22 @@ var migrations = []string{
 	)`,
 	`CREATE INDEX nodes_hw ON nodes(hw_fingerprint)`,
 	`CREATE TABLE revoked (serial TEXT PRIMARY KEY, node_id TEXT NOT NULL, revoked_at INTEGER NOT NULL)`,
+	`CREATE TABLE assignments (
+		id TEXT PRIMARY KEY,
+		node_id TEXT NOT NULL,
+		model_id TEXT NOT NULL,
+		quant TEXT NOT NULL,
+		runtime TEXT NOT NULL,
+		ref TEXT NOT NULL,
+		size INTEGER NOT NULL DEFAULT 0,
+		need INTEGER NOT NULL DEFAULT 0,
+		placement TEXT NOT NULL DEFAULT '',
+		vram INTEGER NOT NULL DEFAULT 0,
+		ram INTEGER NOT NULL DEFAULT 0,
+		residency TEXT NOT NULL DEFAULT 'resident',
+		created_at INTEGER NOT NULL
+	)`,
+	`CREATE INDEX assignments_node ON assignments(node_id)`,
 }
 
 func Open(path string) (*Store, error) {
