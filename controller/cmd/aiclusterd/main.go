@@ -18,6 +18,7 @@ import (
 
 	"aicluster/controller/core"
 	"aicluster/controller/gateway"
+	"aicluster/controller/updates"
 	"aicluster/controller/web"
 )
 
@@ -43,6 +44,9 @@ func main() {
 	flag.StringVar(&cfg.ModelDir, "model-dir", "", "model cache directory (default <data-dir>/models)")
 	flag.StringVar(&cfg.RegistryUpstream, "registry-upstream", "https://registry.ollama.ai", "where the Controller downloads models from")
 	flag.DurationVar(&cfg.ModelGCGrace, "model-gc-grace", 24*time.Hour, "how long Slaves keep unassigned models on disk")
+	updateAPI := flag.String("update-api", updates.DefaultAPI, "GitHub API used for update checks")
+	updateEvery := flag.Duration("update-interval", updates.DefaultInterval, "how often to check GitHub for updates")
+	assumeCommit := flag.String("assume-build-commit", "", "testing: pretend this Controller was built from this commit")
 	flag.StringVar(&logLevel, "log-level", "info", "debug|info|warn|error")
 	flag.Parse()
 	if advertise != "" {
@@ -70,7 +74,15 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	srv := web.New(c, log)
+	build := updates.CurrentBuild(version)
+	if *assumeCommit != "" {
+		build.Commit, build.Time = *assumeCommit, time.Time{}
+	}
+	checker := updates.New(build, web.UpdateSettings(c.Store), log.With("component", "updates"))
+	checker.API, checker.Interval = *updateAPI, *updateEvery
+	checker.Offline = c.Models.Offline.Load
+	log.Info("build", "version", build.Version, "commit", build.Commit, "modified", build.Modified)
+	srv := web.New(c, log).WithUpdates(checker)
 	var gw *gateway.Gateway
 	var gwLn net.Listener
 	if gatewayListen != "" {
@@ -83,6 +95,7 @@ func main() {
 	}
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return c.Run(ctx) })
+	g.Go(func() error { checker.Run(ctx); return nil })
 	g.Go(func() error { return srv.Serve(ctx, mgmtLn) })
 	if gw != nil {
 		g.Go(func() error { return gw.Serve(ctx, gwLn) })

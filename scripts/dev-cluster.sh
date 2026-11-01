@@ -7,6 +7,7 @@
 #   scripts/dev-cluster.sh                 # approve-first, fake models
 #   MODE=auto scripts/dev-cluster.sh       # auto-adopt
 #   UPSTREAM=real scripts/dev-cluster.sh   # download real models from registry.ollama.ai
+#   ASSUME_BUILD_COMMIT=<sha> scripts/dev-cluster.sh  # pretend to be an older build (try the update pop-up)
 #
 # Models: by default a local fake registry serves small stand-in models and
 # the agents use the "fake" runtime (real pulls through the Controller, no
@@ -59,6 +60,7 @@ fi
   --mgmt-listen 127.0.0.1:8090 --gateway-listen 127.0.0.1:18080 \
   --beacon-listen 127.0.0.1:47810 --beacon-targets 127.0.0.1:47811 \
   --provisioner tcp:127.0.0.1:7460 --registry-upstream "$REGISTRY" \
+  ${ASSUME_BUILD_COMMIT:+--assume-build-commit "$ASSUME_BUILD_COMMIT"} \
   --mdns=false --adoption-mode "$MODE" &
 pids+=($!)
 

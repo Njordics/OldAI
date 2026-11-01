@@ -19,6 +19,8 @@ Loopback only: provisioner socket `/run/aicluster/provisioner.sock`, core socket
 
 Outbound: HTTPS to the configured upstreams (registry.ollama.ai, huggingface.co + CDN, archive.ubuntu.com, developer.download.nvidia.com, repo.radeon.com), NTP, DNS.
 
+Update check: one anonymous `GET` to `api.github.com` every 6 hours (branch head, plus a compare when it moved; ETag-cached). Nothing about the cluster is sent. Turn it off under Settings → Updates; offline mode also stops it.
+
 ## Slave
 
 | Port | Proto | Service | Allowed from | Auth |

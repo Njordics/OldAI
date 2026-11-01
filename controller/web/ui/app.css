@@ -521,6 +521,23 @@ table.keys { width: 100%; border-collapse: collapse; margin-top: 10px; }
   .pv-console { border-left: 0; border-top: 1px solid var(--border); }
 }
 
+/* Updates */
+.update-badge { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
+.update-badge:hover { filter: brightness(.95); }
+.update-commits { list-style: none; padding: 0; margin: 12px 0; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.update-commits li { padding: 8px 12px; border-bottom: 1px solid var(--border); display: grid; gap: 2px; }
+.update-commits li:last-child { border-bottom: 0; }
+.uc-msg { font-weight: 550; }
+.uc-meta { font-size: 12px; color: var(--muted); }
+.uc-meta a { color: inherit; }
+.update-how summary { cursor: pointer; font-weight: 550; }
+.update-dialog-actions { flex-wrap: wrap; }
+.update-dialog-actions a.btn { text-decoration: none; }
+.update-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; margin-top: 8px; }
+.update-form .check, .update-form .error, .update-actions { grid-column: 1 / -1; }
+.update-actions { display: flex; gap: 8px; margin-top: 12px; }
+#update-info { margin-top: 16px; }
+
 /* Responsive */
 @media (max-width: 960px) { .hide-md { display: none; } }
 @media (max-width: 720px) {

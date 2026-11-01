@@ -19,13 +19,15 @@ import (
 	"aicluster/controller/core"
 	"aicluster/controller/gateway"
 	"aicluster/controller/store"
+	"aicluster/controller/updates"
 )
 
 type Server struct {
-	core   *core.Core
-	log    *slog.Logger
-	gw     *gateway.Gateway
-	gwPort int
+	core    *core.Core
+	log     *slog.Logger
+	gw      *gateway.Gateway
+	gwPort  int
+	updates *updates.Checker
 }
 
 func New(c *core.Core, log *slog.Logger) *Server { return &Server{core: c, log: log} }
@@ -42,6 +44,7 @@ func (s *Server) Handler() http.Handler {
 	s.modelRoutes(api)
 	s.keyRoutes(api)
 	s.workspaceRoutes(api)
+	s.updateRoutes(api)
 
 	ui, _ := fs.Sub(uiFiles, "ui")
 	mux := http.NewServeMux()
@@ -205,10 +208,16 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 
 type Settings struct {
 	AdoptionMode string `json:"adoption_mode"`
+	UpdateCheck  *bool  `json:"update_check,omitempty"`
+	UpdateRepo   string `json:"update_repo,omitempty"`
+	UpdateBranch string `json:"update_branch,omitempty"`
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteJSON(w, http.StatusOK, Settings{AdoptionMode: s.core.Mode()})
+	u := UpdateSettings(s.core.Store)(r.Context())
+	httpx.WriteJSON(w, http.StatusOK, Settings{
+		AdoptionMode: s.core.Mode(), UpdateCheck: &u.Enabled, UpdateRepo: u.Repo, UpdateBranch: u.Branch,
+	})
 }
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +231,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusBadRequest, proto.ErrBadRequest, err.Error())
 			return
 		}
+	}
+	if ok, msg := s.applyUpdateSettings(r.Context(), req); !ok {
+		httpx.WriteError(w, http.StatusBadRequest, proto.ErrBadRequest, msg)
+		return
 	}
 	s.getSettings(w, r)
 }

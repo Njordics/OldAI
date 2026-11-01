@@ -12,6 +12,7 @@
   <script src="/ui/chat.js" defer></script>
   <script src="/ui/code.js" defer></script>
   <script src="/ui/connect.js" defer></script>
+  <script src="/ui/updates.js" defer></script>
 </head>
 <body>
   <!-- Sign-in -->
@@ -61,6 +62,7 @@
       </nav>
       <div class="topbar-right">
         <span id="conn" class="conn" title="Connection to the Controller"></span>
+        <button id="update-badge" class="pill s-enrolling update-badge" type="button" hidden>Update available</button>
         <span id="mode-pill" class="pill"></span>
         <button id="logout" class="btn btn-ghost btn-sm" type="button">Sign out</button>
       </div>
@@ -281,6 +283,22 @@
       </div>
 
       <div class="card">
+        <h2>Updates</h2>
+        <p class="muted">The Controller can check the project's GitHub repository for newer code and tell you here. It sends one anonymous request every few hours and nothing about your cluster.</p>
+        <form id="update-form" class="update-form">
+          <label class="check"><input type="checkbox" id="update-on"> Check GitHub for updates</label>
+          <label class="field"><span>Repository</span><input id="update-repo" placeholder="owner/name" spellcheck="false"></label>
+          <label class="field"><span>Branch</span><input id="update-branch" placeholder="main" spellcheck="false"></label>
+          <p id="update-form-error" class="error" role="alert" hidden></p>
+          <div class="update-actions">
+            <button class="btn btn-primary btn-sm" type="submit">Save</button>
+            <button class="btn btn-sm" type="button" id="update-check">Check now</button>
+          </div>
+        </form>
+        <dl class="kv" id="update-info"></dl>
+      </div>
+
+      <div class="card">
         <h2>Cluster</h2>
         <dl class="kv" id="cluster-info"></dl>
       </div>
@@ -371,6 +389,26 @@
       <div class="dialog-actions">
         <button class="btn btn-ghost" value="cancel" formnovalidate type="submit">Cancel</button>
         <button class="btn btn-primary" id="swap-go" value="go" type="submit" disabled>Swap</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Update available -->
+  <dialog id="update-dialog" class="dialog dialog-wide">
+    <form method="dialog">
+      <h2>Update available</h2>
+      <p id="update-summary" class="muted"></p>
+      <ul id="update-commits" class="update-commits"></ul>
+      <details class="update-how">
+        <summary>How to update</summary>
+        <p>On the machine you build the Controller from:</p>
+        <pre class="snippet" id="update-steps"></pre>
+        <p class="hint">Slaves keep running while the Controller restarts. One-click, rolling updates arrive with the Controller OS image.</p>
+      </details>
+      <div class="dialog-actions update-dialog-actions">
+        <button class="btn btn-ghost" type="button" id="update-skip">Skip this version</button>
+        <button class="btn btn-ghost" type="button" id="update-later">Remind me tomorrow</button>
+        <a class="btn btn-primary" id="update-github" target="_blank" rel="noopener noreferrer">View changes on GitHub</a>
       </div>
     </form>
   </dialog>

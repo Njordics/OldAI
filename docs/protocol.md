@@ -438,6 +438,16 @@ GET    /api/v1/workspace/zip                everything as a .zip
 GET    /preview                             sandbox page for running HTML/CSS/JS (own CSP: sandbox, no network)
 ```
 
+Update notifications (the Controller compares the git commit it was built from with the configured GitHub branch):
+
+```
+GET  /api/v1/updates             {enabled, repo, branch, current{version,commit,time,modified}, latest, available,
+                                  behind, commits[] (newest first), compare_url, checked_at, error, note, dismissed}
+POST /api/v1/updates/check       check now
+POST /api/v1/updates/dismiss     {commit}   "skip this version"; the pop-up returns for anything newer
+PUT  /api/v1/settings            {update_check: bool, update_repo: "owner/name", update_branch: "main"}
+```
+
 The dashboard's chat playground calls the same routing code through `POST /api/v1/playground/chat/completions` with the admin session instead of a key. Response header `X-AICluster-Node` names the serving node (can be disabled).
 
 ---
