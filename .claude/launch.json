@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev-cluster",
+      "runtimeExecutable": "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+      "runtimeArgs": ["-lc", "SKIP_BUILD=1 exec bash scripts/dev-cluster.sh"],
+      "port": 8090,
+      "url": "https://localhost:8090"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+/bin/
+/.dev/
+*.db
+*.db-wal
+*.db-shm

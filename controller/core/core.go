@@ -1,0 +1,302 @@
+// Package core is the Controller's brain: node registry, internal CA,
+// adoption, heartbeat ingest and health monitoring. It is the only writer of
+// the SQLite store.
+package core
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+
+	"aicluster/common/discovery"
+	"aicluster/common/pki"
+	"aicluster/common/proto"
+	"aicluster/controller/store"
+)
+
+// Adoption modes (setting "adoption_mode").
+const (
+	ModeAuto    = "auto"
+	ModeApprove = "approve"
+)
+
+type Config struct {
+	DataDir       string
+	NodeAPIListen string // ":7443"
+	// Advertise lists node-API endpoints given to Slaves ("https://ip:port").
+	// Empty means every local IPv4 with the node-API port.
+	Advertise []string
+
+	BeaconListen  string // ":47800"; "" disables
+	BeaconPort    int
+	BeaconTargets []string
+	MDNS          bool
+
+	DefaultAdoptionMode string
+	HeartbeatInterval   time.Duration
+	EnrollTimeout       time.Duration
+	DiscoveredTTL       time.Duration
+	MonitorEvery        time.Duration
+	ControllerBeacon    time.Duration
+	Version             string
+}
+
+func (c *Config) defaults() {
+	if c.NodeAPIListen == "" {
+		c.NodeAPIListen = ":7443"
+	}
+	if c.BeaconPort == 0 {
+		c.BeaconPort = proto.DefaultBeaconPort
+	}
+	if c.DefaultAdoptionMode == "" {
+		c.DefaultAdoptionMode = ModeAuto
+	}
+	if c.HeartbeatInterval == 0 {
+		c.HeartbeatInterval = proto.DefaultHeartbeatInterval
+	}
+	if c.EnrollTimeout == 0 {
+		c.EnrollTimeout = 60 * time.Second
+	}
+	if c.DiscoveredTTL == 0 {
+		c.DiscoveredTTL = 5 * time.Minute
+	}
+	if c.MonitorEvery == 0 {
+		c.MonitorEvery = time.Second
+	}
+	if c.ControllerBeacon == 0 {
+		c.ControllerBeacon = 30 * time.Second
+	}
+}
+
+type Core struct {
+	cfg   Config
+	log   *slog.Logger
+	Store *store.Store
+
+	ClusterID  string
+	CA         *pki.CA
+	cert       tls.Certificate
+	AdminToken string
+
+	nodeLn    net.Listener
+	endpoints []string
+
+	mu       sync.Mutex
+	mode     string
+	inflight map[string]bool    // node IDs with an adoption or probe running
+	backoff  map[string]backoff // auto-adoption retry schedule
+}
+
+type backoff struct {
+	next  time.Time
+	delay time.Duration
+}
+
+func New(cfg Config, log *slog.Logger) (*Core, error) {
+	cfg.defaults()
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		return nil, err
+	}
+	st, err := store.Open(filepath.Join(cfg.DataDir, "aicluster.db"))
+	if err != nil {
+		return nil, err
+	}
+	c := &Core{cfg: cfg, log: log, Store: st, inflight: map[string]bool{}, backoff: map[string]backoff{}}
+	ctx := context.Background()
+
+	if c.ClusterID, err = st.Setting(ctx, "cluster_id", ""); err != nil {
+		return nil, err
+	}
+	if c.ClusterID == "" {
+		c.ClusterID = uuid.NewString()
+		if err := st.SetSetting(ctx, "cluster_id", c.ClusterID); err != nil {
+			return nil, err
+		}
+		log.Info("new cluster created", "cluster_id", c.ClusterID)
+	}
+	if c.mode, err = st.Setting(ctx, "adoption_mode", cfg.DefaultAdoptionMode); err != nil {
+		return nil, err
+	}
+	if err := c.loadPKI(); err != nil {
+		return nil, fmt.Errorf("pki: %w", err)
+	}
+	if err := c.loadAdminToken(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (c *Core) Close() error { return c.Store.Close() }
+
+func (c *Core) loadPKI() error {
+	caDir := filepath.Join(c.cfg.DataDir, "ca")
+	ca, err := pki.LoadCA(caDir)
+	if errors.Is(err, os.ErrNotExist) {
+		if ca, err = pki.NewCA(c.ClusterID); err == nil {
+			err = ca.Save(caDir)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	c.CA = ca
+
+	// Browsers check the dashboard certificate by name/IP, so it is reissued
+	// whenever the machine's addresses change (e.g. a new DHCP lease).
+	host, _ := os.Hostname()
+	dnsNames, ips := pki.ControllerSANs(host, append(discovery.LocalIPv4s(), "127.0.0.1"))
+	certFile := filepath.Join(c.cfg.DataDir, "controller.pem")
+	if cert, err := tls.LoadX509KeyPair(certFile, certFile); err == nil {
+		leaf, _ := x509.ParseCertificate(cert.Certificate[0])
+		if leaf != nil && pki.HasURI(leaf, pki.ControllerURI(c.ClusterID)) &&
+			time.Until(leaf.NotAfter) > 30*24*time.Hour && leaf.CheckSignatureFrom(ca.Cert) == nil &&
+			coversIPs(leaf, ips) {
+			c.cert = cert
+			return nil
+		}
+	}
+	cert, err := ca.IssueController(c.ClusterID, dnsNames, ips)
+	if err != nil {
+		return err
+	}
+	keyPEM, err := pki.EncodeKeyPEM(cert.PrivateKey)
+	if err != nil {
+		return err
+	}
+	certPEM := pemCert(cert.Certificate[0])
+	if err := pki.WriteFileAtomic(certFile, append(certPEM, keyPEM...), 0o600); err != nil {
+		return err
+	}
+	c.cert = cert
+	return nil
+}
+
+func coversIPs(leaf *x509.Certificate, ips []net.IP) bool {
+	for _, ip := range ips {
+		found := false
+		for _, have := range leaf.IPAddresses {
+			if have.Equal(ip) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Core) loadAdminToken() error {
+	p := filepath.Join(c.cfg.DataDir, "admin.token")
+	if b, err := os.ReadFile(p); err == nil && len(strings.TrimSpace(string(b))) >= 32 {
+		c.AdminToken = strings.TrimSpace(string(b))
+		return nil
+	}
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	c.AdminToken = hex.EncodeToString(b)
+	return pki.WriteFileAtomic(p, []byte(c.AdminToken+"\n"), 0o600)
+}
+
+// Cert is the Controller's certificate, used by every listener it runs.
+func (c *Core) Cert() tls.Certificate { return c.cert }
+
+// CertFP is the fingerprint Slaves record for the Controller.
+func (c *Core) CertFP() string { return pki.Fingerprint(c.cert.Certificate[0]) }
+
+func (c *Core) Mode() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.mode
+}
+
+func (c *Core) SetMode(ctx context.Context, mode string) error {
+	if mode != ModeAuto && mode != ModeApprove {
+		return fmt.Errorf("adoption_mode must be %q or %q", ModeAuto, ModeApprove)
+	}
+	if err := c.Store.SetSetting(ctx, "adoption_mode", mode); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.mode = mode
+	c.mu.Unlock()
+	c.log.Info("adoption mode changed", "mode", mode)
+	return nil
+}
+
+// Endpoints are the node-API URLs handed to Slaves.
+func (c *Core) Endpoints() []string { return c.endpoints }
+
+// ListenNodeAPI binds the node-API port so its real port is known before
+// endpoints are computed (tests use ":0").
+func (c *Core) ListenNodeAPI() error {
+	ln, err := net.Listen("tcp", c.cfg.NodeAPIListen)
+	if err != nil {
+		return err
+	}
+	c.nodeLn = ln
+	port := ln.Addr().(*net.TCPAddr).Port
+	c.endpoints = c.cfg.Advertise
+	if len(c.endpoints) == 0 {
+		for _, ip := range discovery.LocalIPv4s() {
+			c.endpoints = append(c.endpoints, "https://"+net.JoinHostPort(ip, strconv.Itoa(port)))
+		}
+	}
+	return nil
+}
+
+// Run starts discovery, announcement, the monitor and the node API, and
+// blocks until ctx ends.
+func (c *Core) Run(ctx context.Context) error {
+	if c.nodeLn == nil {
+		if err := c.ListenNodeAPI(); err != nil {
+			return err
+		}
+	}
+	c.log.Info("controller core starting", "cluster_id", c.ClusterID, "mode", c.Mode(), "endpoints", c.endpoints)
+	var wg sync.WaitGroup
+	for _, loop := range []func(context.Context){c.discoveryLoop, c.announceLoop, c.monitorLoop} {
+		wg.Add(1)
+		go func() { defer wg.Done(); loop(ctx) }()
+	}
+	err := c.serveNodeAPI(ctx)
+	wg.Wait()
+	return err
+}
+
+func (c *Core) tryBegin(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.inflight[id] {
+		return false
+	}
+	c.inflight[id] = true
+	return true
+}
+
+func (c *Core) end(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.inflight, id)
+}
+
+func (c *Core) isInflight(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inflight[id]
+}

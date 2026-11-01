@@ -1,0 +1,5 @@
+# Everything ships to Linux; keep LF so shell scripts and embedded assets
+# are identical on every checkout.
+* text=auto eol=lf
+*.png binary
+*.iso binary

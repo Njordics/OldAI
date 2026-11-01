@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Cluster</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6fed'/%3E%3Ccircle cx='16' cy='16' r='4' fill='white'/%3E%3Ccircle cx='8' cy='9' r='2.5' fill='white'/%3E%3Ccircle cx='24' cy='9' r='2.5' fill='white'/%3E%3Ccircle cx='8' cy='23' r='2.5' fill='white'/%3E%3Ccircle cx='24' cy='23' r='2.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/ui/app.css">
+  <script src="/ui/app.js" defer></script>
+</head>
+<body>
+  <!-- Sign-in -->
+  <main id="login" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span>AI Cluster</div>
+      <p class="muted">Sign in with the Controller's admin token.</p>
+      <label class="field">
+        <span>Admin token</span>
+        <input id="login-token" type="password" autocomplete="current-password" required spellcheck="false">
+      </label>
+      <p class="hint">On the Controller: <code>sudo cat /var/lib/aicluster/controller/admin.token</code></p>
+      <p id="login-error" class="error" role="alert" hidden></p>
+      <button class="btn btn-primary" type="submit">Sign in</button>
+
+      <details class="trust">
+        <summary>Seeing a certificate warning?</summary>
+        <p>The Controller signs its own certificate with this cluster's private CA. Trust the CA once on this computer and the warning goes away. The CA can only vouch for local network names (<code>.local</code>, <code>localhost</code>) and private IP addresses, never for internet sites.</p>
+        <p><a class="btn btn-sm" href="/ca.crt" download>Download cluster CA</a></p>
+        <p class="hint">Check the fingerprint matches the one on the Controller's console:<br><code id="ca-fp" class="fp"></code></p>
+        <div class="os-steps">
+          <h3>Windows (Chrome, Edge)</h3>
+          <code class="cmd">certutil -user -addstore Root aicluster-ca.crt</code>
+          <h3>macOS (Safari, Chrome)</h3>
+          <code class="cmd">security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db aicluster-ca.crt</code>
+          <h3>Linux (Chrome)</h3>
+          <code class="cmd">certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n aicluster -i aicluster-ca.crt</code>
+          <h3>Firefox</h3>
+          <p>Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities → Import, then tick "Trust this CA to identify websites".</p>
+        </div>
+        <p class="hint">Then restart the browser. Full guide: <code>docs/dashboard-trust.md</code>.</p>
+      </details>
+    </form>
+  </main>
+
+  <!-- App -->
+  <div id="app" hidden>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span>AI Cluster</div>
+      <nav class="tabs" aria-label="Sections">
+        <a href="#nodes" data-tab="nodes">Nodes</a>
+        <a href="#settings" data-tab="settings">Settings</a>
+      </nav>
+      <div class="topbar-right">
+        <span id="conn" class="conn" title="Connection to the Controller"></span>
+        <span id="mode-pill" class="pill"></span>
+        <button id="logout" class="btn btn-ghost btn-sm" type="button">Sign out</button>
+      </div>
+    </header>
+
+    <!-- Nodes -->
+    <section id="view-nodes" class="view" hidden>
+      <div class="stats" id="stats"></div>
+      <div id="pending" class="pending" hidden></div>
+
+      <div class="toolbar">
+        <h1>Nodes</h1>
+        <div class="filters" id="filters" role="group" aria-label="Filter nodes"></div>
+        <input id="search" class="search" type="search" placeholder="Search name, ID, address" aria-label="Search nodes">
+      </div>
+
+      <div class="table-wrap">
+        <table class="nodes">
+          <thead>
+            <tr>
+              <th>Name</th><th>State</th><th class="hide-sm">Address</th><th class="hide-sm">Hardware</th>
+              <th class="hide-md">Load</th><th class="hide-md">Memory</th><th>Last seen</th><th class="actions-col"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="nodes-body"></tbody>
+        </table>
+        <div id="empty" class="empty" hidden>
+          <h2>No nodes yet</h2>
+          <p>Install the Slave OS on a machine and plug it into this network. It appears here within a few seconds.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="view-settings" class="view" hidden>
+      <h1>Settings</h1>
+      <div class="card">
+        <h2>Adoption</h2>
+        <p class="muted">What the Controller does when a new Slave appears on the network.</p>
+        <div class="choices" id="mode-choices">
+          <label class="choice">
+            <input type="radio" name="mode" value="auto">
+            <span class="choice-body">
+              <strong>Automatic</strong>
+              <span>Adopt every new Slave as soon as it is found. Use on a trusted home or lab network.</span>
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="mode" value="approve">
+            <span class="choice-body">
+              <strong>Approve first</strong>
+              <span>New Slaves wait in the pending list until you adopt them here or with <code>aicluster adopt</code>.</span>
+            </span>
+          </label>
+        </div>
+        <p class="hint">Slaves installed with a pairing code always wait for approval, whatever this is set to.</p>
+      </div>
+
+      <div class="card">
+        <h2>Cluster</h2>
+        <dl class="kv" id="cluster-info"></dl>
+      </div>
+    </section>
+  </div>
+
+  <!-- Node detail drawer -->
+  <aside id="drawer" class="drawer" hidden aria-labelledby="drawer-title">
+    <div class="drawer-head">
+      <div>
+        <h2 id="drawer-title"></h2>
+        <div id="drawer-sub" class="muted mono"></div>
+      </div>
+      <button id="drawer-close" class="btn btn-ghost btn-icon" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div id="drawer-actions" class="drawer-actions"></div>
+    <div id="drawer-body" class="drawer-body"></div>
+  </aside>
+  <div id="scrim" class="scrim" hidden></div>
+
+  <!-- Adopt dialog -->
+  <dialog id="adopt-dialog" class="dialog">
+    <form method="dialog" id="adopt-form">
+      <h2>Adopt <span id="adopt-name"></span></h2>
+      <p class="muted">The Controller issues this node a certificate. From then on it only takes commands from this cluster.</p>
+      <label class="field" id="adopt-code-field" hidden>
+        <span>Pairing code</span>
+        <input id="adopt-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" placeholder="6 digits on the node's screen">
+      </label>
+      <p id="adopt-error" class="error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+        <button class="btn btn-primary" id="adopt-go" value="go" type="submit">Adopt</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Release dialog -->
+  <dialog id="release-dialog" class="dialog">
+    <form method="dialog" id="release-form">
+      <h2>Release <span id="release-name"></span>?</h2>
+      <p class="muted">The node stops serving, forgets this cluster and goes back to unadopted. It is not adopted again automatically; you can adopt it again later.</p>
+      <label class="check"><input type="checkbox" id="release-keep"> Keep downloaded models on the node</label>
+      <p id="release-error" class="error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn btn-danger" id="release-go" value="go" type="submit">Release</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
