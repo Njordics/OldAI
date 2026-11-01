@@ -1,0 +1,64 @@
+#!/bin/bash
+# Writes the AI Cluster status shown above the console login prompt and
+# asks agetty to redraw it when it changes. agetty expands \4 to the
+# machine's IPv4 address and \n to its hostname.
+set -u
+
+role=$(cat /etc/aicluster/role 2>/dev/null || echo unknown)
+out=/etc/issue.d/aicluster.issue
+tmp=$(mktemp)
+
+json_field() { # file key
+	sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" 2>/dev/null | head -n1
+}
+
+{
+	printf '\033[H\033[2J' # redraw in place instead of scrolling
+	echo
+	case "$role" in
+	controller)
+		dir=/var/lib/aicluster/controller
+		echo "  AI Cluster Controller  (\\n)"
+		echo
+		echo "  Dashboard:    https://\\4:8090"
+		echo "  OpenAI API:   http://\\4:8080/v1"
+		if [ -s "$dir/admin.token" ]; then
+			echo "  Admin token:  $(cat "$dir/admin.token")"
+		else
+			echo "  Admin token:  (starting up...)"
+		fi
+		if [ -s "$dir/ca/ca.crt" ]; then
+			fp=$(openssl x509 -in "$dir/ca/ca.crt" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
+			echo "  CA cert:      https://\\4:8090/ca.crt"
+			echo "                SHA-256 $fp"
+		fi
+		state=$(systemctl is-active aiclusterd 2>/dev/null)
+		echo "  Service:      $state"
+		;;
+	slave)
+		dir=/var/lib/aicluster
+		echo "  AI Cluster node  (\\n, \\4)"
+		echo
+		id=$(json_field "$dir/identity.json" node_id)
+		[ -n "$id" ] && echo "  Node ID:      $id"
+		if [ -s "$dir/adoption.json" ]; then
+			name=$(json_field "$dir/adoption.json" node_name)
+			echo "  Status:       adopted${name:+ as $name}"
+		else
+			echo "  Status:       waiting for a Controller"
+			if [ -s /run/aicluster/pairing-code ]; then
+				echo "  Pairing code: $(cat /run/aicluster/pairing-code)"
+			fi
+		fi
+		echo "  Agent:        $(systemctl is-active aicluster-agent 2>/dev/null)"
+		echo "  Runtime:      $(systemctl is-active ollama 2>/dev/null)"
+		;;
+	esac
+	echo
+} >"$tmp"
+
+if ! cmp -s "$tmp" "$out"; then
+	install -m 0644 "$tmp" "$out"
+	agetty --reload 2>/dev/null || true
+fi
+rm -f "$tmp"

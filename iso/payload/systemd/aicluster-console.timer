@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the AI Cluster console status screen
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=15s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

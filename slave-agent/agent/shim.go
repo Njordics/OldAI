@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +22,13 @@ func (a *Agent) listenShim() error {
 		return err
 	}
 	a.shimLn = ln
+	// Blob redirects point at "localhost", which may resolve to ::1; listen
+	// there too (same port, still loopback). Hosts without IPv6 skip it.
+	if addr := ln.Addr().(*net.TCPAddr); addr.IP.Equal(net.IPv4(127, 0, 0, 1)) {
+		if ln6, err := net.Listen("tcp", net.JoinHostPort("::1", strconv.Itoa(addr.Port))); err == nil {
+			a.shimLn6 = ln6
+		}
+	}
 	return nil
 }
 
@@ -40,14 +48,45 @@ func (a *Agent) serveShim(ctx context.Context) {
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 	}()
+	if a.shimLn6 != nil {
+		go func() { _ = srv.Serve(a.shimLn6) }()
+	}
 	if err := srv.Serve(a.shimLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		a.log.Error("registry shim stopped", "err", err)
 	}
 }
 
+// directPrefix marks blob downloads that already followed the shim's redirect.
+const directPrefix = "/direct"
+
 func (a *Agent) handleShim(w http.ResponseWriter, r *http.Request) {
-	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !strings.HasPrefix(r.URL.Path, "/v2/") {
+	path := r.URL.Path
+	direct := strings.HasPrefix(path, directPrefix+"/v2/")
+	if direct {
+		path = strings.TrimPrefix(path, directPrefix)
+	}
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !strings.HasPrefix(path, "/v2/") {
 		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	// Ollama fetches a blob by asking the registry where it lives (a 307 to a
+	// CDN on registry.ollama.ai) and then downloading that URL in ranges; a
+	// blob answered without the redirect fails with "no Location header".
+	// Ollama follows redirects within the same host name itself, so point to
+	// the other name for loopback (127.0.0.1 <-> localhost).
+	if !direct && r.Method == http.MethodGet && strings.Contains(path, "/blobs/") {
+		host, port, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host, port = r.Host, ""
+		}
+		other := "localhost"
+		if host == "localhost" {
+			other = "127.0.0.1"
+		}
+		if port != "" {
+			other = net.JoinHostPort(other, port)
+		}
+		http.Redirect(w, r, "http://"+other+directPrefix+path, http.StatusTemporaryRedirect)
 		return
 	}
 	a.mu.RLock()
@@ -60,7 +99,7 @@ func (a *Agent) handleShim(w http.ResponseWriter, r *http.Request) {
 	client := a.shimClient(ad)
 	var lastErr error
 	for _, ep := range a.endpointsOf(ad) {
-		req, err := http.NewRequestWithContext(r.Context(), r.Method, ep+r.URL.Path, nil)
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, ep+path, nil)
 		if err != nil {
 			continue
 		}

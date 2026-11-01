@@ -1,0 +1,50 @@
+# Ubuntu 24.04 autoinstall for an AI Cluster @ROLE@. build.sh fills in the
+# @...@ placeholders. Subiquity reads /autoinstall.yaml from the install
+# medium; the "autoinstall" kernel argument in grub.cfg skips the prompt.
+autoinstall:
+  version: 1
+  interactive-sections: []
+  refresh-installer:
+    update: false
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: Etc/UTC
+  source:
+    id: ubuntu-server
+  network:
+    version: 2
+    ethernets:
+      wired:
+        match:
+          name: "e*"
+        dhcp4: true
+        optional: true
+  apt:
+    geoip: false
+    # Works without internet: packages come from the ISO's own pool.
+    fallback: offline-install
+  updates: security
+  storage:
+    layout:
+      name: lvm
+      sizing-policy: all
+  ssh:
+    install-server: @SSH_SERVER@
+    allow-pw: false
+  user-data:
+    disable_root: true
+    users:
+      - name: aicluster-admin
+        gecos: AI Cluster admin
+        groups: [sudo]
+        shell: /bin/bash
+        sudo: "ALL=(ALL) NOPASSWD:ALL"
+        lock_passwd: @LOCK_PASSWD@
+@PASSWD_LINE@
+@SSH_KEYS@
+  late-commands:
+    - cp -a /cdrom/aicluster /target/var/tmp/aicluster-payload
+    - curtin in-target --target=/target -- bash /var/tmp/aicluster-payload/install-target.sh @ROLE@
+    - rm -rf /target/var/tmp/aicluster-payload
+  shutdown: reboot

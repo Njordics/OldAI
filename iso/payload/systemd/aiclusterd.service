@@ -1,0 +1,24 @@
+[Unit]
+Description=AI Cluster Controller
+Documentation=https://github.com/Njordics/OldAI
+Wants=network-online.target aicluster-provisioner.service
+After=network-online.target aicluster-provisioner.service
+
+[Service]
+User=aicluster
+Group=aicluster
+StateDirectory=aicluster
+StateDirectoryMode=0750
+EnvironmentFile=-/etc/aicluster/controller.env
+ExecStart=/usr/bin/aiclusterd $AICLUSTERD_ARGS
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/aicluster /run/aicluster
+
+[Install]
+WantedBy=multi-user.target

@@ -2,7 +2,10 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -243,5 +246,67 @@ func TestModelAPI(t *testing.T) {
 	var left []core.ModelStatus
 	if err := call("GET", "/api/v1/models", nil, &left); err != nil || len(left) != 0 {
 		t.Fatalf("models after delete: %v %+v", err, left)
+	}
+}
+
+// Ollama asks a registry where a blob lives and expects a 307 with a
+// Location (registry.ollama.ai redirects to its CDN), then downloads that
+// location in ranges. The shim must answer the same way (found with real
+// Ollama on VMs: "http: no Location header in response").
+func TestShimRedirectsBlobsLikeARegistry(t *testing.T) {
+	requireProvisioner(t)
+	c := startController(t, core.ModeAuto)
+	s := startSlave(t, c)
+	c.waitState(t, s.NodeID(), store.StateAdopted, adoptTimeout)
+	as, err := c.Install(context.Background(), core.InstallRequest{ModelID: "all-minilm:22m", Nodes: []string{s.NodeID()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.waitModel(t, as[0].ID, proto.ModelLoaded)
+
+	base := "http://" + s.ShimHost()
+	resp, err := http.Get(base + "/v2/library/all-minilm/manifests/22m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Layers []struct{ Digest string } `json:"layers"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&manifest)
+	resp.Body.Close()
+	if err != nil || len(manifest.Layers) == 0 {
+		t.Fatalf("manifest: %v %+v", err, manifest)
+	}
+
+	// Ollama's own rule: follow redirects within a host name, stop at the first
+	// one to another host and use its Location.
+	blobURL := base + "/v2/library/all-minilm/blobs/" + manifest.Layers[0].Digest
+	asOllama := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if req.URL.Hostname() == via[0].URL.Hostname() {
+			return nil
+		}
+		return http.ErrUseLastResponse
+	}}
+	resp, err = asOllama.Get(blobURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	loc, err := resp.Location()
+	if resp.StatusCode != http.StatusTemporaryRedirect || err != nil {
+		t.Fatalf("blob GET = %d, location %v", resp.StatusCode, err)
+	}
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	req, _ := http.NewRequest(http.MethodGet, loc.String(), nil)
+	req.Header.Set("Range", "bytes=0-9")
+	resp, err = noFollow.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent || len(body) != 10 {
+		t.Fatalf("ranged download of %s = %d with %d bytes", loc, resp.StatusCode, len(body))
 	}
 }

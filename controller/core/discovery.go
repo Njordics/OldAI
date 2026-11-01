@@ -61,53 +61,71 @@ func (c *Core) discoveryLoop(ctx context.Context) {
 // monitor loop decides what to do (adopt, mark pending, ...).
 func (c *Core) OnSighting(ctx context.Context, s Sighting) {
 	now := time.Now().UTC()
-	n, err := c.Store.GetNode(ctx, s.NodeID)
-	if errors.Is(err, store.ErrNotFound) {
-		n = &store.Node{NodeID: s.NodeID, State: store.StateDiscovered, FirstSeen: now, StateSince: now}
-		c.log.Info("node discovered", "node_id", s.NodeID, "addr", s.Addr, "source", s.Source, "hw", s.HW)
-	} else if err != nil {
-		c.log.Error("load node", "err", err)
-		return
-	}
-
-	moved := n.Addr != "" && (n.Addr != s.Addr || n.Port != s.Port)
-	n.Addr, n.Port, n.FP = s.Addr, s.Port, s.FP
-	n.AgentState, n.ClusterID = s.State, s.ClusterID
-	n.HWSummary, n.PairingRequired, n.AgentVersion = s.HW, s.PairingRequired, s.AgentVersion
-	n.LastSeen = now
-
 	ours := s.ClusterID == c.ClusterID
-	switch {
-	case s.State == proto.AgentAdopted && ours:
-		// Ours; heartbeats drive its state. A node we have no record of (e.g.
-		// restored DB) shows as offline until its first heartbeat.
-		if n.State == store.StateDiscovered {
-			setState(n, store.StateOffline, now)
+	// apply runs inside the store's read-modify-write, so a sighting never
+	// overwrites what adoption or a heartbeat saved meanwhile (mDNS and the
+	// beacon report the same node every few seconds, during adoption too).
+	var moved, lostIdentity bool
+	var revokeSerial string
+	apply := func(n *store.Node) error {
+		moved = n.Addr != "" && (n.Addr != s.Addr || n.Port != s.Port)
+		lostIdentity, revokeSerial = false, ""
+		n.Addr, n.Port, n.FP = s.Addr, s.Port, s.FP
+		n.AgentState, n.ClusterID = s.State, s.ClusterID
+		n.HWSummary, n.PairingRequired, n.AgentVersion = s.HW, s.PairingRequired, s.AgentVersion
+		n.LastSeen = now
+
+		switch {
+		case s.State == proto.AgentAdopted && ours:
+			// Ours; heartbeats drive its state. A node we have no record of (e.g.
+			// restored DB) shows as offline until its first heartbeat.
+			if n.State == store.StateDiscovered {
+				setState(n, store.StateOffline, now)
+			}
+		case s.State == proto.AgentAdopted:
+			if n.State != store.StateReleased {
+				setState(n, store.StateForeign, now)
+			}
+		default: // unadopted or enrolling
+			switch n.State {
+			case store.StateAdopted, store.StateOffline:
+				// Our node lost its identity (factory reset, wiped disk, expired
+				// cert). Its old certificate is no longer in use.
+				lostIdentity, revokeSerial = true, n.CertSerial
+				n.CertSerial, n.Returning, n.Inventory = "", true, nil
+				setState(n, store.StateDiscovered, now)
+			case store.StateForeign:
+				setState(n, store.StateDiscovered, now)
+			}
 		}
-	case s.State == proto.AgentAdopted:
-		if n.State != store.StateReleased {
-			setState(n, store.StateForeign, now)
-		}
-	default: // unadopted or enrolling
-		switch n.State {
-		case store.StateAdopted, store.StateOffline:
-			// Our node lost its identity (factory reset, wiped disk, expired
-			// cert). Its old certificate is no longer in use.
-			c.log.Warn("adopted node reappeared unadopted", "node_id", n.NodeID)
-			_ = c.Store.Revoke(ctx, n.CertSerial, n.NodeID)
-			n.CertSerial, n.Returning, n.Inventory = "", true, nil
-			setState(n, store.StateDiscovered, now)
-		case store.StateForeign:
-			setState(n, store.StateDiscovered, now)
+		return nil
+	}
+
+	_, err := c.Store.UpdateNode(ctx, s.NodeID, apply)
+	if errors.Is(err, store.ErrNotFound) {
+		n := &store.Node{NodeID: s.NodeID, State: store.StateDiscovered, FirstSeen: now, StateSince: now}
+		_ = apply(n)
+		var added bool
+		if added, err = c.Store.InsertNode(ctx, n); err == nil {
+			if added {
+				c.log.Info("node discovered", "node_id", s.NodeID, "addr", s.Addr, "source", s.Source, "hw", s.HW)
+			} else {
+				// Another sighting created it first.
+				_, err = c.Store.UpdateNode(ctx, s.NodeID, apply)
+			}
 		}
 	}
-	if err := c.Store.PutNode(ctx, n); err != nil {
+	if err != nil {
 		c.log.Error("save node", "err", err)
 		return
 	}
+	if lostIdentity {
+		c.log.Warn("adopted node reappeared unadopted", "node_id", s.NodeID)
+		_ = c.Store.Revoke(ctx, revokeSerial, s.NodeID)
+	}
 	if moved && s.State == proto.AgentAdopted && ours {
 		// Pool leaders dial their workers at this address.
-		go c.resyncPoolsOf(context.Background(), n.NodeID)
+		go c.resyncPoolsOf(context.Background(), s.NodeID)
 	}
 }
 

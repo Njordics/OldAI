@@ -74,8 +74,28 @@ func (l *LlamaCpp) bin(name string) string {
 	return p
 }
 
+// command runs a llama.cpp binary with its directory on the library path:
+// release builds ship libllama/libggml next to the executables.
+func (l *LlamaCpp) command(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, l.bin(name), args...)
+	cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+l.Dir)
+	if l.CacheDir != "" {
+		cmd.Env = append(cmd.Env, "LLAMA_CACHE="+l.CacheDir)
+	}
+	return cmd
+}
+
+// rpcServer is the worker binary: "ggml-rpc-server" in current llama.cpp
+// releases, "rpc-server" in older ones.
+func (l *LlamaCpp) rpcServer() string {
+	if _, err := os.Stat(l.bin("ggml-rpc-server")); err == nil {
+		return "ggml-rpc-server"
+	}
+	return "rpc-server"
+}
+
 func (l *LlamaCpp) Check() error {
-	for _, b := range []string{"rpc-server", "llama-server"} {
+	for _, b := range []string{l.rpcServer(), "llama-server"} {
 		if _, err := os.Stat(l.bin(b)); err != nil {
 			return fmt.Errorf("llama.cpp %s not found in %s", b, l.Dir)
 		}
@@ -130,10 +150,7 @@ func (l *LlamaCpp) StartWorker(ctx context.Context) (Proc, error) {
 		_ = os.MkdirAll(l.CacheDir, 0o755)
 		args = append(args, "-c")
 	}
-	cmd := exec.Command(l.bin("rpc-server"), args...)
-	if l.CacheDir != "" {
-		cmd.Env = append(os.Environ(), "LLAMA_CACHE="+l.CacheDir)
-	}
+	cmd := l.command(context.Background(), l.rpcServer(), args...)
 	var out bytes.Buffer
 	addr := "127.0.0.1:" + strconv.Itoa(port)
 	p, err := start(cmd, addr, &out)
@@ -152,7 +169,11 @@ func (l *LlamaCpp) StartLeader(ctx context.Context, spec LeaderSpec) (Proc, erro
 	for _, w := range spec.Workers {
 		rpc = append(rpc, w.Addr)
 	}
-	list, err := exec.CommandContext(ctx, l.bin("llama-server"), "--list-devices", "--rpc", strings.Join(rpc, ",")).CombinedOutput()
+	// --rpc must come first: llama.cpp prints the list as soon as it parses --list-devices.
+	// It waits on every worker, so bound it: a dead tunnel must fail, not hang.
+	lctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	list, err := l.command(lctx, "llama-server", "--rpc", strings.Join(rpc, ","), "--list-devices").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("llama-server --list-devices: %w: %s", err, tail(string(list)))
 	}
@@ -161,7 +182,7 @@ func (l *LlamaCpp) StartLeader(ctx context.Context, spec LeaderSpec) (Proc, erro
 		return nil, err
 	}
 	args := LeaderArgs(spec, ParseDevices(string(list)), port)
-	cmd := exec.Command(l.bin("llama-server"), args...)
+	cmd := l.command(context.Background(), "llama-server", args...)
 	var out bytes.Buffer
 	addr := "127.0.0.1:" + strconv.Itoa(port)
 	p, err := start(cmd, addr, &out)
@@ -179,10 +200,15 @@ func (l *LlamaCpp) StartLeader(ctx context.Context, spec LeaderSpec) (Proc, erro
 	return p, nil
 }
 
-var deviceLine = regexp.MustCompile(`^\s+([A-Za-z]+\d*|RPC\[[^\]]+\])\s*:`)
+var (
+	deviceLine = regexp.MustCompile(`^\s+([A-Za-z]+\d*|RPC\[[^\]]+\])\s*:\s*(\S*)`)
+	rpcIndexed = regexp.MustCompile(`^RPC\d+$`)
+)
 
 // ParseDevices reads `llama-server --list-devices` output into device names
-// in llama.cpp's order, e.g. ["CUDA0", "RPC[127.0.0.1:50052]"].
+// in llama.cpp's order, e.g. ["CUDA0", "RPC[127.0.0.1:50052]"]. RPC devices
+// are named by address: older llama.cpp prints "RPC[addr]: …", newer prints
+// "RPC0: addr (…)".
 func ParseDevices(out string) []string {
 	var devs []string
 	in := false
@@ -197,6 +223,9 @@ func ParseDevices(out string) []string {
 			continue
 		}
 		if m := deviceLine.FindStringSubmatch(line); m != nil {
+			if rpcIndexed.MatchString(m[1]) {
+				m[1] = "RPC[" + m[2] + "]"
+			}
 			devs = append(devs, m[1])
 		}
 	}

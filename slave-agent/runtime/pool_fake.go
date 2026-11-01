@@ -40,24 +40,24 @@ func (f *FakePool) StartWorker(ctx context.Context) (Proc, error) {
 	if err != nil {
 		return nil, err
 	}
+	// One client at a time, like ggml-rpc-server: a connection the tunnel
+	// fails to close blocks every later one.
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			go func() {
-				defer c.Close()
-				br := bufio.NewReader(c)
-				for {
-					line, err := br.ReadString('\n')
-					if err != nil {
-						return
-					}
-					n := strings.TrimSpace(strings.TrimPrefix(line, "PING"))
-					fmt.Fprintf(c, "PONG %s %s\n", f.Label, n)
+			br := bufio.NewReader(c)
+			for {
+				line, err := br.ReadString('\n')
+				if err != nil {
+					break
 				}
-			}()
+				n := strings.TrimSpace(strings.TrimPrefix(line, "PING"))
+				fmt.Fprintf(c, "PONG %s %s\n", f.Label, n)
+			}
+			c.Close()
 		}
 	}()
 	return &fakeProc{addr: ln.Addr().String(), stop: func() { ln.Close() }, done: make(chan struct{})}, nil

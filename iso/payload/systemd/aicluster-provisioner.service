@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Cluster provisioner (model catalog and placement)
+Documentation=https://github.com/Njordics/OldAI
+
+[Service]
+User=aicluster
+Group=aicluster
+Environment=PYTHONPATH=/usr/lib/aicluster/provisioner
+ExecStart=/usr/bin/python3 -m aicluster_provisioner --listen unix:/run/aicluster/provisioner.sock --catalog /usr/share/aicluster/catalog --catalog /etc/aicluster/catalog.d
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/aicluster
+
+[Install]
+WantedBy=multi-user.target

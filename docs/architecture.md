@@ -102,7 +102,7 @@ The provisioner never talks to Slaves and never writes the cluster DB. If it is 
 | Unit | Role |
 |---|---|
 | `aicluster-agent` | Single Go binary. Announces, serves enrollment, then mTLS command API. Reconciles desired state (drivers → runtime → models). Sends heartbeats. Reverse-proxies inference to the runtime. Exposes metrics. |
-| `aicluster-registry-shim` | Part of the agent binary (goroutine, not a unit). Loopback-only OCI-registry façade so `ollama pull 127.0.0.1:7452/library/…` fetches blobs from the Controller over mTLS. |
+| `aicluster-registry-shim` | Part of the agent binary (goroutine, not a unit). Loopback-only OCI-registry façade so `ollama pull 127.0.0.1:7452/library/…` fetches blobs from the Controller over mTLS. Like registry.ollama.ai it answers blob requests with a 307 to a direct-download URL on the other loopback name (`localhost` ↔ `127.0.0.1`, listening on `[::1]` too), because Ollama only accepts a redirect to a different host. |
 | runtime units | `aicluster-runtime-ollama`, `-llamacpp@<model>`, `-vllm@<model>`, `-whisper`. Installed and enabled by the agent; always bound to `127.0.0.1`. |
 
 The Slave has **no SSH by default**. The console shows a status screen (node ID, IP, state, pairing code if required) and a single local escape hatch: `aicluster-agent factory-reset` from the physical console.
@@ -242,7 +242,7 @@ go.mod          one Go module ("aicluster") for all Go code
   /web          management API (dashboard assets from step 5, embedded via go:embed)
   /provisioner  Python package: catalog, fit, policies (pyproject, pytest)
 /catalog        model YAML definitions + JSON Schema
-/iso            Makefile targets, autoinstall user-data, package builds, Docker build env
+/iso            build.sh (remasters the Ubuntu ISO), autoinstall template, payload + systemd units, Docker build env — see iso.md
 /test
   /integration  in-process Controller + agents over loopback (go test)
   /e2e          Proxmox harness (Go test driver) + VM scenarios
@@ -256,8 +256,8 @@ For models no single node can hold, one copy can be split across several nodes w
 
 - **Placement** (provisioner `/pool`): automatic picks the fewest nodes, GPU memory first, then GPU + RAM, at the best quantisation that fits within 4 members; when the admin picks the nodes, every one takes part in proportion to its free memory. The member with the largest share that has disk room for the file becomes the leader.
 - **Records:** each member is an assignment row sharing a `group_id`, with `role` (leader/worker) and `share`; fit accounting, status and removal work per node. Removing any member, or releasing a member's node, removes the whole pool. Pools can't be swapped.
-- **Workers** run `rpc-server` on loopback; it is reachable only through `GET /v1/rpc-tunnel/<group>` on the agent, which accepts an mTLS client certificate for exactly that pool's leader node and then becomes a raw byte stream (HTTP Upgrade). `rpc-server` itself has no authentication, so it never listens on the LAN.
-- **Leader** downloads the GGUF (the Ollama model layer) from the Controller cache, opens a loopback tunnel listener per worker, and starts `llama-server --rpc <tunnels> --tensor-split <shares>` in the device order llama.cpp reports. It probes each worker every reconcile; an unreachable worker marks the pool failed, and a worker whose `rpc-server` restarted (new epoch) makes the leader reload.
+- **Workers** run llama.cpp's RPC server (`ggml-rpc-server`; `rpc-server` in older releases) on loopback; it is reachable only through `GET /v1/rpc-tunnel/<group>` on the agent, which accepts an mTLS client certificate for exactly that pool's leader node and then becomes a raw byte stream (HTTP Upgrade). The RPC server itself has no authentication, so it never listens on the LAN.
+- **Leader** downloads the GGUF (the Ollama model layer) from the Controller cache, opens a loopback tunnel listener per worker, and starts `llama-server --rpc <tunnels> --tensor-split <shares>` in the device order llama.cpp reports. It probes each worker every reconcile; an unreachable worker marks the pool failed, and a worker whose RPC server restarted (new epoch) makes the leader reload.
 - **Serving:** the gateway offers a pooled model only while its leader and every worker report loaded and are online, and sends requests to the leader's agent route `llamacpp:<assignment>`.
 - **Trade-offs:** slower than one machine (every token crosses every member; 10 Gb+ networking helps), and the model is down whenever any member is.
 

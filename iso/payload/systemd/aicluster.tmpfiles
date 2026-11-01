@@ -1,0 +1,3 @@
+# /run/aicluster holds the provisioner socket (Controller) or the pairing
+# code (Slave). Owner is fixed up per role by install-target.sh.
+d /run/aicluster 0750 root root -

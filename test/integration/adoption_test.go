@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -265,5 +266,45 @@ func TestMgmtAPIAuth(t *testing.T) {
 	}
 	if err := httpx.Do(ctx, srv.Client(), http.MethodPut, srv.URL+"/api/v1/settings", web.Settings{AdoptionMode: "yolo"}, nil, auth...); err == nil {
 		t.Fatal("accepted invalid mode")
+	}
+}
+
+// mDNS and the beacon each report a node every few seconds, also while
+// adoption and heartbeats write its record. A sighting must never overwrite
+// those writes with the copy it read earlier (found on real VMs: adopted
+// nodes lost their name, inventory and desired state).
+func TestSightingsDoNotOverwriteConcurrentWrites(t *testing.T) {
+	c := startController(t, "approve")
+	ctx := context.Background()
+	const id = "11111111-2222-3333-4444-555555555555"
+	sight := core.Sighting{NodeID: id, Addr: "127.0.0.1", Port: proto.DefaultAgentPort, FP: "sha256:00",
+		State: proto.AgentUnadopted, Source: "beacon"}
+	c.OnSighting(ctx, sight)
+
+	const writes = 300
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range writes {
+			c.OnSighting(ctx, sight)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range writes {
+			if _, err := c.Store.UpdateNode(ctx, id, func(n *store.Node) error { n.LastSeq++; return nil }); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+	n, err := c.Store.GetNode(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.LastSeq != writes {
+		t.Fatalf("sightings overwrote %d of %d concurrent writes", writes-int(n.LastSeq), writes)
 	}
 }

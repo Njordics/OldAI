@@ -294,13 +294,31 @@ func (s *Store) PutNode(ctx context.Context, n *Node) error {
 }
 
 func (s *Store) putNode(ctx context.Context, n *Node) error {
-	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO nodes(`+nodeCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.writeNode(ctx, "INSERT OR REPLACE", n)
+	return err
+}
+
+// InsertNode adds n unless a node with its ID already exists; it reports
+// whether n was added. Use it to create records that concurrent writers may
+// also be creating, then UpdateNode when it returns false.
+func (s *Store) InsertNode(ctx context.Context, n *Node) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.writeNode(ctx, "INSERT OR IGNORE", n)
+	if err != nil {
+		return false, err
+	}
+	added, err := res.RowsAffected()
+	return added == 1, err
+}
+
+func (s *Store) writeNode(ctx context.Context, verb string, n *Node) (sql.Result, error) {
+	return s.db.ExecContext(ctx, verb+` INTO nodes(`+nodeCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		n.NodeID, n.Name, n.HWFingerprint, n.State, n.Phase, n.AgentState, n.ClusterID, n.Addr, n.Port, n.FP,
 		n.PairingRequired, n.AgentVersion, n.HWSummary, n.CertSerial, n.Returning,
 		nullJSON(n.Inventory), nullJSON(n.Observed), nullJSON(n.Health), nullJSON(n.Desired),
 		n.DesiredGen, n.ObservedGen, n.BootID, n.LastSeq,
 		toMS(n.FirstSeen), toMS(n.LastSeen), toMS(n.LastHeartbeat), toMS(n.AdoptedAt), toMS(n.StateSince), n.LastError)
-	return err
 }
 
 // UpdateNode loads a node, lets fn mutate it, and writes it back in one

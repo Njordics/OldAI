@@ -1,0 +1,6 @@
+[Unit]
+Description=Refresh the AI Cluster console status screen
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/aicluster/console-status

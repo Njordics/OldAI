@@ -454,6 +454,16 @@ type bufConn struct {
 
 func (c *bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
+// CloseWrite passes a client's close on through the TLS tunnel; without it
+// the worker's rpc-server (one client at a time) waits on that connection
+// forever and every later one hangs.
+func (c *bufConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return c.Conn.Close()
+}
+
 type tunnel struct {
 	ln net.Listener
 }
@@ -499,7 +509,13 @@ func splice(a, b net.Conn) {
 	go cp(a, b)
 	go cp(b, a)
 	<-done
-	<-done
+	// RPC is request/response: once one side is finished, the other has
+	// little left to say. Don't let a peer that never closes pin the
+	// connection (and with it the single-client rpc-server).
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
 	a.Close()
 	b.Close()
 }

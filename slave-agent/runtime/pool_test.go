@@ -20,6 +20,17 @@ func TestParseDevices(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("devices = %v", got)
 	}
+	// llama.cpp b12032 names RPC devices by index; captured from a real run.
+	current := "load_backend: loaded RPC backend from libggml-rpc.so\nAvailable devices:\n" +
+		"  CUDA0: NVIDIA GeForce RTX 3090 (24135 MiB, 23700 MiB free)\n" +
+		"  RPC0: 127.0.0.1:50061 (32053 MiB, 32053 MiB free)\n" +
+		"  RPC1: 127.0.0.1:50062 (32053 MiB, 32053 MiB free)\n"
+	if got := ParseDevices(current); !reflect.DeepEqual(got, []string{"CUDA0", "RPC[127.0.0.1:50061]", "RPC[127.0.0.1:50062]"}) {
+		t.Fatalf("indexed RPC devices = %v", got)
+	}
+	if d := ParseDevices("Available devices:\n  (none)\n"); len(d) != 0 {
+		t.Fatalf("parsed %v from an empty list", d)
+	}
 	if d := ParseDevices("no devices here"); len(d) != 0 {
 		t.Fatalf("parsed %v from junk", d)
 	}

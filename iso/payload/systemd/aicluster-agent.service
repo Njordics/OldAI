@@ -1,0 +1,16 @@
+[Unit]
+Description=AI Cluster node agent
+Documentation=https://github.com/Njordics/OldAI
+Wants=network-online.target ollama.service
+After=network-online.target ollama.service
+
+[Service]
+# Root: the agent reads hardware inventory and runs llama.cpp for pooled models.
+EnvironmentFile=-/etc/aicluster/agent.env
+ExecStart=/usr/bin/aicluster-agent run $AGENT_ARGS
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

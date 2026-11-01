@@ -137,6 +137,7 @@ type Agent struct {
 	infer      inferStats
 	reconcileC chan struct{}
 	shimLn     net.Listener
+	shimLn6    net.Listener // [::1] twin of shimLn: the redirect target "localhost" may resolve there
 	shimMu     sync.Mutex
 	shimHTTP   *http.Client
 	shimFor    *adopted

@@ -4,7 +4,7 @@ BIN      := bin/linux-amd64
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 GOBUILD  := CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)"
 
-.PHONY: all build test vet clean controller-iso slave-iso
+.PHONY: all build test vet clean controller-iso slave-iso isos
 
 all: vet test build
 
@@ -21,7 +21,11 @@ test:
 	$(GO) test ./... -count=1
 
 clean:
-	rm -rf bin
+	rm -rf bin build out
 
-controller-iso slave-iso:
-	@echo "ISO builds arrive in build step 6" && exit 1
+# Installer ISOs (Ubuntu 24.04 autoinstall). See iso/build.sh for options;
+# without xorriso on the host it builds inside Docker (iso/Dockerfile).
+controller-iso slave-iso: build
+	VERSION=$(VERSION) bash iso/build.sh $(@:-iso=)
+
+isos: controller-iso slave-iso
