@@ -74,7 +74,7 @@ flowchart LR
 make isos
 ```
 
-You get `out/aicluster-controller-<version>.iso` and `out/aicluster-slave-<version>.iso`. Flash them to USB sticks with anything that writes ISOs.
+You get `out/aicluster-controller-<version>.iso` and `out/aicluster-slave-<version>.iso`. Flash them to USB sticks with anything that writes ISOs (balenaEtcher, Ventoy, `dd`, or Rufus in either mode).
 
 **2. Boot the Controller.** When it's done, its console shows the dashboard URL, the OpenAI API URL and a **login code** (`XXXX-XXXX`).
 

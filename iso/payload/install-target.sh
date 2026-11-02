@@ -81,17 +81,41 @@ slave)
 		log "no Ollama in this image; the node will report its runtime as unavailable"
 	fi
 
-	if [ -d "$src/runtime/llama.cpp" ]; then
-		# Optional: without it the node works, only pooled models don't.
+	# Optional: without llama.cpp the node works, only pooled models don't.
+	lc=/usr/lib/aicluster/llama.cpp
+	if [ -f "$src/runtime/llama.cpp.tgz" ] || [ -d "$src/runtime/llama.cpp" ]; then
 		log "installing llama.cpp (pooled models)"
-		lc=/usr/lib/aicluster/llama.cpp
-		if rm -rf "$lc" && cp -r "$src/runtime/llama.cpp" "$lc" && chmod 0755 "$lc"/*-server; then
-			missing=$(LD_LIBRARY_PATH=$lc ldd "$lc/llama-server" 2>&1 | awk '/not found/ {print $1}') || missing="(ldd failed)"
-			if [ -n "$missing" ]; then
-				log "WARNING: llama.cpp is missing libraries: $missing; pooled models won't work on this node"
-			fi
+		if rm -rf "$lc" && mkdir -p "$lc" &&
+			if [ -f "$src/runtime/llama.cpp.tgz" ]; then
+				tar -C "$lc" -xzf "$src/runtime/llama.cpp.tgz"
+			else
+				cp -r "$src/runtime/llama.cpp/." "$lc/"
+			fi; then
+			chmod 0755 "$lc"
 		else
 			log "WARNING: llama.cpp could not be installed; pooled models won't work on this node"
+		fi
+	fi
+	if [ -d "$lc" ]; then
+		# Images that kept llama.cpp as loose files lost its library symlinks
+		# when written to a FAT32 USB stick: they arrived as empty files.
+		# Point each one back at the versioned library it stood for.
+		for f in "$lc"/lib*.so*; do
+			[ -f "$f" ] && [ ! -L "$f" ] && [ ! -s "$f" ] || continue
+			to=$(cd "$lc" && ls -d "$(basename "$f")".* 2>/dev/null | awk '{print length, $0}' | sort -n | head -n1 | cut -d' ' -f2-) || true
+			if [ -n "$to" ]; then
+				ln -sfn "$to" "$f"
+				log "repaired llama.cpp library link $(basename "$f") -> $to"
+			fi
+		done
+		bad=
+		for b in "$lc"/*-server; do
+			[ -f "$b" ] || continue
+			chmod 0755 "$b"
+			LD_LIBRARY_PATH=$lc "$b" --help >/dev/null 2>&1 || bad+=" $(basename "$b")"
+		done
+		if [ -n "$bad" ]; then
+			log "WARNING: llama.cpp doesn't start ($bad ); pooled models won't work on this node"
 		fi
 	fi
 

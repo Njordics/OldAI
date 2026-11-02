@@ -183,7 +183,8 @@ else
 		[ -n "$rpc" ] || die "llama.cpp $tag has no RPC server in its ubuntu-x64 build (set LLAMACPP_VERSION, or SKIP_LLAMACPP=1)"
 		dir=$(dirname "$rpc")
 		[ -f "$dir/llama-server" ] || die "llama.cpp $tag: llama-server is not next to $(basename "$rpc")"
-		lc=$stage/aicluster/runtime/llama.cpp
+		lc=$work/llama.cpp-stage
+		rm -rf "$lc"
 		mkdir -p "$lc"
 		cp "$rpc" "$dir/llama-server" "$lc/"
 		find "$dir" -maxdepth 1 -name '*.so*' -exec cp -P {} "$lc/" \;
@@ -192,6 +193,9 @@ else
 		gomp=$(ldconfig -p | awk '/libgomp\.so\.1 .*x86-64/ {print $NF; exit}')
 		[ -n "$gomp" ] || die "libgomp.so.1 not found on the build machine (apt install libgomp1)"
 		cp -L "$gomp" "$lc/libgomp.so.1"
+		# Shipped as one archive: its libraries are found through symlinks,
+		# which USB tools that copy the ISO onto FAT32 turn into empty files.
+		tar -C "$lc" -czf "$stage/aicluster/runtime/llama.cpp.tgz" .
 		components+=" llama.cpp=$tag"
 	fi
 fi
