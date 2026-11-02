@@ -74,6 +74,8 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
 .field-inline { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
 .bench-bar-cell { min-width: 140px; white-space: nowrap; }
 .bench-meter { width: 70px; margin-right: 8px; }
+.bench-cloud { margin-top: 18px; }
+.bench-cloud .table-wrap { margin: 10px 0 4px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 /* Brand */

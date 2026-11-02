@@ -165,6 +165,20 @@
           <tbody id="bench-results"></tbody>
         </table>
       </div>
+
+      <div class="card bench-cloud" id="bench-cloud-card" hidden>
+        <h2>Cloud models for comparison</h2>
+        <p id="bench-cloud-summary"></p>
+        <div class="table-wrap bench-scroll">
+          <table class="nodes bench-table">
+            <thead>
+              <tr><th>Service</th><th>Model</th><th>Writes (tokens/s)</th><th>First token</th></tr>
+            </thead>
+            <tbody id="bench-cloud"></tbody>
+          </table>
+        </div>
+        <p class="hint">Published figures from <a id="bench-cloud-source" target="_blank" rel="noopener noreferrer"></a>, as of <span id="bench-cloud-asof"></span>, not measured by this cluster. <span id="bench-cloud-how"></span> Your experience adds your internet connection's delay. The first token can take much longer for models that think before answering. This compares speed only: these cloud models are far larger than anything a home cluster runs, and usually give better answers.</p>
+      </div>
     </section>
 
     <!-- Chat playground -->

@@ -1,0 +1,15 @@
+{
+  "source": "Artificial Analysis model leaderboard",
+  "url": "https://artificialanalysis.ai/leaderboards/models",
+  "as_of": "2026-11-02",
+  "how": "Median output speed and time to the first chunk of the answer, measured by Artificial Analysis on each provider's own API from their servers. For each model, the setting that answers quickest.",
+  "models": [
+    { "service": "ChatGPT", "model": "GPT-5.5 Instant", "setting": "", "gen_tps": 154, "ttft_s": 0.88 },
+    { "service": "ChatGPT", "model": "GPT-6.1 Terra", "setting": "non-reasoning", "gen_tps": 91, "ttft_s": 0.96 },
+    { "service": "ChatGPT", "model": "GPT-6.1 Sol", "setting": "low", "gen_tps": 61, "ttft_s": 2.48 },
+    { "service": "Claude", "model": "Claude Haiku 5.5", "setting": "low", "gen_tps": 167, "ttft_s": 8.83 },
+    { "service": "Claude", "model": "Claude Sonnet 5.5", "setting": "low", "gen_tps": 106, "ttft_s": 1.15 },
+    { "service": "Claude", "model": "Claude Opus 5.5", "setting": "low", "gen_tps": 79, "ttft_s": 10.33 },
+    { "service": "Grok", "model": "Grok 4.7", "setting": "low", "gen_tps": 70, "ttft_s": 6.11 }
+  ]
+}

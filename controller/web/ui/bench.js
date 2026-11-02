@@ -3,6 +3,7 @@
 "use strict";
 
 const bench = {
+  cloud: null, // published cloud figures, from cloud-reference.json
   targets: [],
   results: [],
   job: null,
@@ -11,6 +12,16 @@ const bench = {
 };
 
 const benchKey = t => `${t.model_id}|${t.node_id}`;
+
+// loadCloud reads the published cloud-model figures shipped with the
+// dashboard (no request leaves the cluster).
+async function loadCloud() {
+  if (bench.cloud) return;
+  try {
+    const r = await fetch("/ui/cloud-reference.json", { cache: "no-cache" });
+    if (r.ok) bench.cloud = await r.json();
+  } catch { /* the page works without them */ }
+}
 
 async function loadBench() {
   const v = await api("GET", "/api/v1/benchmarks");
@@ -24,7 +35,7 @@ async function loadBench() {
 
 function tps(v) {
   if (!v) return "—";
-  return v >= 100 ? Math.round(v).toString() : v.toFixed(1);
+  return v >= 100 || Number.isInteger(v) ? Math.round(v).toString() : v.toFixed(1);
 }
 
 function renderBench() {
@@ -55,7 +66,9 @@ function renderBench() {
     status.hidden = true;
   }
 
-  const best = Math.max(1, ...bench.results.filter(r => !r.error).map(r => r.gen_tps || 0));
+  const cloud = bench.cloud?.models || [];
+  // One scale for the cluster's results and the cloud figures, so the bars compare.
+  const best = Math.max(1, ...bench.results.filter(r => !r.error).map(r => r.gen_tps || 0), ...cloud.map(m => m.gen_tps));
   const res = bench.results.map(r => {
     if (r.error) {
       return `<tr><td class="num">${ago(r.at)}</td><td>${esc(r.model_id)}</td><td>${esc(r.node_name)}</td>
@@ -75,7 +88,32 @@ function renderBench() {
     </tr>`;
   }).join("");
   morph($("#bench-results"), res || `<tr><td colspan="9" class="muted">No results yet.</td></tr>`);
+  renderCloud(best);
   $("#bench-clear").hidden = !bench.results.length || running;
+}
+
+function renderCloud(best) {
+  const c = bench.cloud;
+  $("#bench-cloud-card").hidden = !c;
+  if (!c) return;
+  const rows = c.models.map(m => `<tr>
+      <td>${esc(m.service)}</td>
+      <td>${esc(m.model)}${m.setting ? ` <span class="muted">(${esc(m.setting)})</span>` : ""}</td>
+      <td class="bench-bar-cell"><meter class="bench-meter" min="0" max="${best}" value="${m.gen_tps}"></meter><strong>${tps(m.gen_tps)}</strong></td>
+      <td class="num">${m.ttft_s < 1 ? Math.round(m.ttft_s * 1000) + " ms" : m.ttft_s.toFixed(1) + " s"}</td>
+    </tr>`).join("");
+  morph($("#bench-cloud"), rows);
+  const mine = bench.results.filter(r => !r.error && r.parallel === 1).sort((a, b) => b.gen_tps - a.gen_tps)[0];
+  const speeds = c.models.map(m => m.gen_tps);
+  const lo = Math.min(...speeds), hi = Math.max(...speeds);
+  $("#bench-cloud-summary").textContent = mine
+    ? `Your fastest single-user result: ${mine.model_id} on ${mine.node_name}, ${tps(mine.gen_tps)} tokens/s. These cloud models write ${lo} to ${hi}.`
+    : `These cloud models write ${lo} to ${hi} tokens/s. Run a benchmark to compare.`;
+  const link = $("#bench-cloud-source");
+  link.href = c.url;
+  link.textContent = c.source;
+  $("#bench-cloud-asof").textContent = new Date(c.as_of + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+  $("#bench-cloud-how").textContent = c.how;
 }
 
 async function runBench() {
@@ -103,7 +141,7 @@ async function clearBench() {
 }
 
 hooks.route.push(view => {
-  if (view === "bench") loadBench().then(renderBench).catch(e => { if (e instanceof AuthError) showLogin(); else toast(e.message, true); });
+  if (view === "bench") Promise.all([loadBench(), loadCloud()]).then(renderBench).catch(e => { if (e instanceof AuthError) showLogin(); else toast(e.message, true); });
 });
 hooks.refresh.push(async () => {
   if ($("#view-bench").hidden) return;

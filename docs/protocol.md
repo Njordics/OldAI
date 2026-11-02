@@ -711,6 +711,8 @@ The dashboard's **Benchmark** tab measures how fast each model runs on each node
 
 Targets run one at a time, each with a 5-minute limit.
 
+**Cloud models for comparison.** Below the results, the tab lists published speeds of the models behind ChatGPT, Claude and Grok, on the same scale. The figures come from `controller/web/ui/cloud-reference.json`, which ships with the dashboard, so no request leaves the cluster. They are Artificial Analysis's median output speed and time to the first chunk, measured on each provider's API from their servers, for each model's quickest setting. The file records the source, link and date; update it by editing the file. They are not measured from your network, and they compare speed only, not answer quality.
+
 **Tested:**
 - **Automated tests:** single and parallel runs, a missing model reported as an error, no two runs at once, the history kept and cleared.
 - **Test VM with real Ollama** (`qwen2.5:0.5b` q8_0 on 4 virtual cores):
