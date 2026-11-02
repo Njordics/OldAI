@@ -9,8 +9,8 @@ import (
 	"aicluster/common/proto"
 )
 
-// Health samples the cheap per-heartbeat metrics. GPU and inference fields
-// are filled by later build steps.
+// Health samples the cheap per-heartbeat metrics. The agent adds inference
+// load, temperatures and GPU state.
 func Health(modelDir string) proto.Health {
 	h := proto.Health{
 		MemTotal: meminfo("MemTotal"),

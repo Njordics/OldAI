@@ -614,3 +614,41 @@ Slaves have no internet, so the Controller picks each node's GPU driver and serv
 **Memory.** Integrated GPUs (Intel's at `00:02.0`, AMD's with under 2 GiB of dedicated memory) are marked `integrated`: they use the node's RAM, so the planner keeps budgeting models from RAM and doesn't count that memory twice. Discrete AMD cards report their memory from `mem_info_vram_total`. The planner counts a GPU's memory only once its driver works (`compute.api` set). Intel Arc cards are used by Ollama, but their memory isn't read yet, so the planner budgets from RAM for them.
 
 **Tested:** a Slave VM without internet, reporting an RTX 4090's modalias (a VM can't have the real card), got `nvidia-driver-580-server-open`. It installed it and kernel 6.8.0-147 through the Controller, rebooted once from 6.8.0-139, and then failed at `modprobe nvidia: No such device`, as it should without the card. A second run reported an Intel UHD 630: the node installed Mesa through the Controller in about 12 seconds, without a reboot, and then reported that no `i915`/`xe` driver was loaded, which is right in a VM. With Mesa installed and integrated GPUs allowed, Ollama found no Vulkan devices and stayed on the CPU, so Mesa's software renderer (`llvmpipe`) isn't mistaken for a GPU. Not tested: a real NVIDIA, Intel or AMD GPU.
+
+## 15. Temperatures and fans
+
+**Reading.** Every heartbeat's `health` carries `thermal` and, for NVIDIA cards, `gpus`. The agent samples every 3 seconds.
+- **Sensors** come from `/sys/class/hwmon`: one directory per chip (`coretemp`, `k10temp`, `nvme`, `amdgpu`, the motherboard's `nct6775`/`it87`, …), with `tempN_input` in millidegrees and `tempN_crit`. Per-core readings are left out; the package reading covers them. At most 24 sensors are sent.
+- **`cpu_temp_c`** is the hottest reading of the CPU chips (`coretemp`, `k10temp`, `zenpower`, `cpu_thermal`).
+- **`throttled`** means Intel's `package_throttle_count` went up since the last sample. AMD doesn't report throttling.
+- **NVIDIA cards** report utilisation, memory, temperature, power and thermal slowdown through `nvidia-smi` in `health.gpus[]`.
+- **Fans** are `fanN_input` (RPM) paired with `pwmN` (0–255, shown as `duty` in percent). `control` is `firmware` when the agent could drive the fan, `agent` while it does, and `fixed` when the OS can't set its speed.
+- **`fan_control`** is `yes` when the agent can drive at least one fan, otherwise why not. Office PCs and most laptops leave fans to their firmware.
+
+```json
+"thermal": {
+  "cpu_temp_c": 71, "throttled": false, "fan_control": "yes",
+  "sensors": [ { "chip": "coretemp", "label": "Package id 0", "temp_c": 71, "crit_c": 100 },
+               { "chip": "nvme", "label": "Composite", "temp_c": 42 } ],
+  "fans": [ { "id": "nct6798/fan2", "label": "", "rpm": 1240, "duty": 91, "control": "agent" } ]
+}
+```
+
+**Hot nodes.** A node is hot when its CPU or an NVIDIA card is throttling for heat, or its CPU is at 95 °C or more. The gateway adds 0.5 to a hot node's score, so new requests go to cooler nodes with free slots, but a hot node still serves when nothing else can. The dashboard shows the CPU temperature in the node list and a warning in the node's details.
+
+**Fans.** The setting `fans` (`PUT /api/v1/settings {"fans": "firmware"|"boost"}`) is cluster-wide. With `boost`, every node's desired state carries `fans: {mode: "boost"}`. The agent then drives every fan whose `pwmN` and `pwmN_enable` it can write:
+1. **Save first.** Before touching a fan it saves `pwmN_enable` and `pwmN` to `/var/lib/aicluster/fans.json`.
+2. **Take over.** It sets `pwmN_enable` to 1 (manual).
+3. **Follow the temperature.** It sets the duty from the hottest CPU or GPU (a graphics card's own fan follows that card): 35% at 45 °C or below, rising evenly to 100% at 75 °C, and full speed from 85 °C. It never sets less than the `pwmN` the firmware was running when the agent took over.
+4. **Hand back.** Without any temperature reading, after a failed write, when the setting goes back to `firmware`, and when the agent stops, it restores the saved mode.
+
+A crash can't leave fans boosted:
+- the unit runs `aicluster-agent fans-restore` as `ExecStopPost`, which restores from `fans.json` whenever the agent stops for any reason;
+- the agent also restores from that file when it starts.
+
+NVIDIA cards' own fans stay under the card's control.
+
+**Tested:**
+- **Automated tests:** sensor readings from a fake `/sys` tree reach the Controller. `boost` takes over a fan at the expected duty, never below the firmware's, and at full speed when hot. Switching back, stopping the agent and restoring from the saved file all return the fan to the firmware.
+- **Test VM:** a VM has no sensors. Its node reported `no fans are visible to the operating system`, `boost` changed nothing, and `fans-restore` ran cleanly on every stop.
+- **Not tested:** real sensors and fans.

@@ -5,9 +5,13 @@ Wants=network-online.target ollama.service
 After=network-online.target ollama.service
 
 [Service]
-# Root: the agent reads hardware inventory and runs llama.cpp for pooled models.
+# Root: the agent reads hardware inventory, installs GPU drivers, sets fan
+# speeds and runs llama.cpp for pooled models.
 EnvironmentFile=-/etc/aicluster/agent.env
 ExecStart=/usr/bin/aicluster-agent run $AGENT_ARGS
+# Fans the agent boosted go back to the firmware whenever it stops, crashes
+# included (protocol §15).
+ExecStopPost=-/usr/bin/aicluster-agent fans-restore $AGENT_ARGS
 Restart=always
 RestartSec=3
 LimitNOFILE=65536

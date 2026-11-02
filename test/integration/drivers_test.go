@@ -281,3 +281,22 @@ func (r *recordingDrivers) Load(ctx context.Context, s proto.DriverSpec) (string
 	r.onLoad(s)
 	return r.fakeDrivers.Load(ctx, s)
 }
+
+// A card taken out of a node disappears from its inventory, and its driver
+// from its desired state.
+func TestRemovedGPU(t *testing.T) {
+	archive, _ := fakeArchive(t)
+	c := startController(t, core.ModeAuto, func(cfg *core.Config) { cfg.AptMirror = archive.URL + "/ubuntu" })
+	fd := &fakeDrivers{}
+	s := startSlave(t, c, func(cfg *agent.Config) { cfg.Drivers, cfg.ScanGPUs = fd, fd.gpus })
+	adoptAll(t, c, s)
+	waitFor(t, 30*time.Second, "a driver for the card", func() bool { return ds0(t, c, s.NodeID()) != nil })
+
+	s.cfg.ScanGPUs = func() []proto.GPUInfo { return nil }
+	s.restart(t)
+	waitFor(t, 30*time.Second, "the card and its driver to go", func() bool {
+		var inv proto.Inventory
+		_ = json.Unmarshal(c.node(t, s.NodeID()).Inventory, &inv)
+		return len(inv.GPUs) == 0 && ds0(t, c, s.NodeID()) == nil
+	})
+}

@@ -2,6 +2,7 @@
 //
 //	aicluster-agent [run] [flags]      serve (systemd unit)
 //	aicluster-agent factory-reset      console escape hatch: forget the Controller
+//	aicluster-agent fans-restore       hand boosted fans back to the firmware (systemd runs it on stop)
 package main
 
 import (
@@ -18,6 +19,7 @@ import (
 
 	"aicluster/common/selfupdate"
 	"aicluster/slave-agent/agent"
+	"aicluster/slave-agent/thermal"
 )
 
 var version = "0.2.0-dev"
@@ -62,6 +64,9 @@ func main() {
 	if *updateDir != "" && runtime.GOOS == "linux" {
 		cfg.Installer = selfupdate.FileInstaller{Path: *updateDir}
 	}
+	if runtime.GOOS == "linux" {
+		cfg.Fans = &thermal.FanController{StateFile: filepath.Join(cfg.DataDir, "fans.json")}
+	}
 	if *drivers && runtime.GOOS == "linux" {
 		unit := ""
 		if cfg.Runtime == "ollama" {
@@ -80,6 +85,9 @@ func main() {
 	if d, ok := cfg.Drivers.(*agent.AptDrivers); ok {
 		d.Log = log.With("component", "drivers")
 	}
+	if cfg.Fans != nil {
+		cfg.Fans.Log = log.With("component", "fans")
+	}
 
 	switch cmd {
 	case "run":
@@ -92,6 +100,11 @@ func main() {
 		defer stop()
 		if err := a.Run(ctx); err != nil {
 			log.Error("agent stopped", "err", err)
+			os.Exit(1)
+		}
+	case "fans-restore":
+		if err := thermal.RestoreFromFile(filepath.Join(cfg.DataDir, "fans.json")); err != nil {
+			log.Error("fans restore failed", "err", err)
 			os.Exit(1)
 		}
 	case "factory-reset":

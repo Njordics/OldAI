@@ -85,7 +85,7 @@
           <thead>
             <tr>
               <th>Name</th><th>State</th><th class="hide-sm">Address</th><th class="hide-sm">Hardware</th>
-              <th class="hide-md">Load</th><th class="hide-md">Memory</th><th>Last seen</th><th class="actions-col"><span class="sr-only">Actions</span></th>
+              <th class="hide-md">Load</th><th class="hide-md">Memory</th><th class="hide-md">CPU temp</th><th>Last seen</th><th class="actions-col"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody id="nodes-body"></tbody>
@@ -288,6 +288,13 @@
         <p class="muted">NVIDIA cards get their driver from Ubuntu through the Controller. Intel and AMD graphics get Mesa's Vulkan driver.</p>
         <label class="check"><input type="checkbox" id="igpu-on"> Run models on graphics built into the processor</label>
         <p class="hint">Integrated Intel and AMD graphics share the node's memory. On recent chips (Intel Iris Xe and Arc, AMD Radeon 680M and newer) they answer faster than the processor alone; on older ones, like Intel UHD 600-series, they can be slower. Turn this off if replies get slower.</p>
+      </div>
+
+      <div class="card">
+        <h2>Cooling</h2>
+        <p class="muted">Every node reports its temperatures. A node that slows down for heat gets fewer requests while cooler nodes have room.</p>
+        <label class="check"><input type="checkbox" id="fans-boost"> Run fans harder to keep nodes cool</label>
+        <p class="hint">Normally each machine's firmware runs its fans. With this on, nodes that let the operating system set fan speed run them faster as they warm up: 35% at 45 °C, full speed at 75 °C, and never slower than the firmware had them. That's louder, and it keeps processors and graphics cards from slowing down. Many office PCs and laptops don't allow it; node details say which do. Turning it off, or a node's agent stopping, hands the fans back to the firmware.</p>
       </div>
 
       <div class="card">

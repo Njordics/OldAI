@@ -100,7 +100,7 @@ If anything doesn't come back on the new version, it is rolled back and the rema
   - The catalog goes in `/usr/share/aicluster/catalog`; local additions go in `/etc/aicluster/catalog.d`.
 - **Slave:**
   - `ollama.service` runs as the `ollama` user, listens on loopback only, and keeps models in `/var/lib/aicluster/models/ollama`.
-  - `aicluster-agent.service` runs as root, takes extra flags from `/etc/aicluster/agent.env` as `AGENT_ARGS=`, and expects llama.cpp in `/usr/lib/aicluster/llama.cpp`.
+  - `aicluster-agent.service` runs as root, takes extra flags from `/etc/aicluster/agent.env` as `AGENT_ARGS=`, and expects llama.cpp in `/usr/lib/aicluster/llama.cpp`. When it stops, `aicluster-agent fans-restore` hands any fans it boosted back to the firmware.
 - **Both:**
   - `aicluster-console.timer` (the status screen) and `/etc/aicluster/role`.
   - The updater: when a daemon stages an update in `/var/lib/aicluster/update`, `aicluster-update.path` starts `/usr/lib/aicluster/apply-update` as root.

@@ -31,6 +31,7 @@ var (
 	ErrAlreadyThere = errors.New("model is already on this node")
 	ErrNoPoolNeeded = errors.New("this model fits on one node; install it without splitting")
 	ErrPooledSwap   = errors.New("a model split across nodes can't be swapped; remove it and install another")
+	ErrBadFanMode   = errors.New(`fan mode must be "firmware" or "boost"`)
 )
 
 // PoolParallel is how many requests a pooled model serves at once.
@@ -381,6 +382,7 @@ func (c *Core) SyncDesired(ctx context.Context, nodeID string) {
 	}
 	network := c.slaveNetworkFor(ctx, nodeID)
 	update := c.agentUpdateFor(nodeID)
+	fans := c.fanSpec(ctx)
 	var drv *proto.DriverSpec
 	drvKnown := false
 	if node, err := c.Store.GetNode(ctx, nodeID); err == nil {
@@ -400,8 +402,8 @@ func (c *Core) SyncDesired(ctx context.Context, nodeID string) {
 		if !drvKnown {
 			drv = desired.Drivers // the driver list is still loading
 		}
-		before, _ := json.Marshal([]any{desired.Models, desired.Runtimes, desired.NodeName, desired.Network, desired.Update, desired.Drivers})
-		after, _ := json.Marshal([]any{models, runtimes, n.Name, network, update, drv})
+		before, _ := json.Marshal([]any{desired.Models, desired.Runtimes, desired.NodeName, desired.Network, desired.Update, desired.Drivers, desired.Fans})
+		after, _ := json.Marshal([]any{models, runtimes, n.Name, network, update, drv, fans})
 		if string(before) == string(after) && desired.GCGraceS == int(c.cfg.ModelGCGrace/time.Second) {
 			return nil
 		}
@@ -410,6 +412,7 @@ func (c *Core) SyncDesired(ctx context.Context, nodeID string) {
 		desired.Models, desired.Runtimes, desired.Network, desired.Update = models, runtimes, network, update
 		// A driver may need a reboot into a newer kernel (§14).
 		desired.Drivers, desired.AllowReboot = drv, drv != nil && drv.Vendor == "nvidia"
+		desired.Fans = fans
 		desired.GCGraceS = int(c.cfg.ModelGCGrace / time.Second)
 		desired.Generation = n.DesiredGen + 1
 		n.DesiredGen = desired.Generation
@@ -534,6 +537,8 @@ type Replica struct {
 	Route string
 	// Pool lists the other nodes a pooled replica depends on.
 	Pool []string
+	// Hot: the node is throttling for heat, or close to it (§15).
+	Hot bool
 }
 
 // Replicas lists, per model, the online nodes that hold it.
@@ -553,6 +558,7 @@ func (c *Core) Replicas(ctx context.Context) (map[string][]Replica, error) {
 			continue
 		}
 		slots := 4
+		hot := isHot(n)
 		var h proto.Health
 		if json.Unmarshal(n.Health, &h) == nil && h.Inference.Slots > 0 {
 			slots = h.Inference.Slots
@@ -568,7 +574,7 @@ func (c *Core) Replicas(ctx context.Context) (map[string][]Replica, error) {
 				}
 				out[m.ModelID] = append(out[m.ModelID], Replica{
 					ModelID: m.ModelID, NodeID: n.NodeID, NodeName: n.Name, BaseURL: nodeBase(n), LocalName: m.LocalName,
-					Loaded: true, Slots: PoolParallel, Route: "llamacpp:" + m.AssignmentID, Pool: members,
+					Loaded: true, Slots: PoolParallel, Route: "llamacpp:" + m.AssignmentID, Pool: members, Hot: hot,
 				})
 				continue
 			}
@@ -578,6 +584,7 @@ func (c *Core) Replicas(ctx context.Context) (map[string][]Replica, error) {
 			out[m.ModelID] = append(out[m.ModelID], Replica{
 				ModelID: m.ModelID, NodeID: n.NodeID, NodeName: n.Name, BaseURL: nodeBase(n),
 				LocalName: m.LocalName, Loaded: m.State == proto.ModelLoaded, Slots: slots, Route: "ollama",
+				Hot: hot,
 			})
 		}
 	}

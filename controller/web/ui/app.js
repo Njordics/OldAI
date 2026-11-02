@@ -288,10 +288,11 @@ function renderTable() {
         <td class="hide-sm">${hwLabel(n.hw_summary)}</td>
         <td class="hide-md num">${live && h.load1 !== undefined ? h.load1.toFixed(2) : `<span class="muted">—</span>`}</td>
         <td class="hide-md">${live ? memMeter(h) : `<span class="muted">—</span>`}</td>
+        <td class="hide-md num">${live ? tempLabel(h) : `<span class="muted">—</span>`}</td>
         <td class="num">${ago(n.state === "adopted" || n.state === "offline" ? n.last_heartbeat : n.last_seen)}</td>
         <td class="actions">${action}</td>
       </tr>`;
-  }).join("") || (state.nodes.length ? `<tr><td colspan="8" class="muted">No nodes match.</td></tr>` : ""));
+  }).join("") || (state.nodes.length ? `<tr><td colspan="9" class="muted">No nodes match.</td></tr>` : ""));
 }
 
 function renderNodes() {
@@ -302,6 +303,55 @@ function renderNodes() {
 }
 
 // ---------- Rendering: drawer ----------
+
+// Temperatures (protocol §15). A node is hot when it slows down for heat,
+// or its CPU reaches HOT_C (AMD processors don't report throttling).
+const HOT_C = 95, WARM_C = 80;
+
+function isHot(h) {
+  const t = h?.thermal;
+  return !!(t && (t.throttled || t.cpu_temp_c >= HOT_C)) || !!h?.gpus?.some(g => g.throttled);
+}
+
+function celsius(v) { return `${Math.round(v)} °C`; }
+
+function tempClass(v, crit) {
+  if (v >= (crit ? Math.min(crit - 5, HOT_C) : HOT_C)) return "bad-text";
+  return v >= WARM_C ? "warn-text" : "";
+}
+
+// tempLabel is the node list's CPU temperature cell.
+function tempLabel(h) {
+  const t = h?.thermal;
+  if (!t || !t.cpu_temp_c) return `<span class="muted">—</span>`;
+  const cls = isHot(h) ? "bad-text" : tempClass(t.cpu_temp_c);
+  return `<span class="${cls}" title="${isHot(h) ? "Slowing down for heat" : ""}">${celsius(t.cpu_temp_c)}${isHot(h) ? " ⚠" : ""}</span>`;
+}
+
+const FAN_CONTROL = { agent: "boosted by the agent", firmware: "firmware (the agent can boost it)", fixed: "firmware only" };
+
+// thermalSection lists a node's temperatures, GPUs and fans.
+function thermalSection(h) {
+  const t = h.thermal;
+  if (!t) return `<div class="section"><h3>Temperatures</h3><p class="muted">This node's agent doesn't report temperatures; update it.</p></div>`;
+  const rows = [
+    ["CPU", t.cpu_temp_c ? `<span class="${tempClass(t.cpu_temp_c)}">${celsius(t.cpu_temp_c)}</span>${t.throttled ? ` <span class="bad-text">· slowing down for heat</span>` : ""}` : `<span class="muted">not reported</span>`],
+  ];
+  for (const g of h.gpus || []) {
+    rows.push([`GPU ${g.index}`, `<span class="${tempClass(g.temp_c)}">${celsius(g.temp_c)}</span>
+      <span class="muted">· ${Math.round((g.util || 0) * 100)}% busy · ${bytes(g.mem_used)} of ${bytes(g.mem_total)}${g.power_w ? ` · ${Math.round(g.power_w)} W` : ""}</span>
+      ${g.throttled ? ` <span class="bad-text">· slowing down for heat</span>` : ""}`]);
+  }
+  const others = (t.sensors || []).filter(s => s.chip !== "nvidia");
+  if (others.length) {
+    rows.push(["Sensors", others.map(s => `<div><span class="${tempClass(s.temp_c, s.crit_c)}">${celsius(s.temp_c)}</span> <span class="muted">${esc(s.chip)} · ${esc(s.label)}${s.crit_c ? ` · critical ${celsius(s.crit_c)}` : ""}</span></div>`).join("")]);
+  }
+  rows.push(["Fans", (t.fans || []).length
+    ? t.fans.map(f => `<div>${f.rpm ? `${f.rpm} rpm` : `<span class="muted">no speed reading</span>`}${f.duty ? ` · ${f.duty}%` : ""} <span class="muted">${esc(f.label || f.id)} · ${esc(FAN_CONTROL[f.control] || f.control)}</span></div>`).join("")
+    : `<span class="muted">None visible to the operating system</span>`]);
+  rows.push(["Fan control", t.fan_control === "yes" ? "Possible on this node" : `<span class="muted">${esc(t.fan_control || "unknown")}</span>`]);
+  return `<div class="section"><h3>Temperatures</h3>${kv(rows)}</div>`;
+}
 
 function kv(pairs) {
   return `<dl class="kv">${pairs.filter(p => p).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
@@ -343,6 +393,8 @@ function renderDrawer() {
     n.cert_serial ? ["Certificate", `<span class="mono">${esc(n.cert_serial.slice(0, 16))}…</span>`] : null,
   ])}</div>`);
 
+  if (n.state === "adopted" && isHot(h)) parts.push(`<div class="banner warn">This node is slowing down for heat. New requests go to cooler nodes while they have room. Check its airflow, or turn on Settings → Cooling.</div>`);
+
   if (n.state === "adopted" || n.state === "offline") {
     parts.push(`<div class="section"><h3>Health</h3>${kv([
       ["Uptime", duration(h.uptime_s)],
@@ -350,6 +402,7 @@ function renderDrawer() {
       ["Memory", h.mem_total ? `${memMeter(h)} <span class="muted">${bytes(h.mem_total - h.mem_avail)} of ${bytes(h.mem_total)}</span>` : "—"],
       ["Disk free", bytes(h.disk_free)],
     ])}</div>`);
+    parts.push(thermalSection(h));
   }
 
   if (inv) {
@@ -425,6 +478,7 @@ function renderSettings() {
   if (!c) return;
   for (const r of document.querySelectorAll('input[name=mode]')) r.checked = r.value === c.adoption_mode;
   $("#igpu-on").checked = !!c.integrated_gpus;
+  $("#fans-boost").checked = c.fans === "boost";
   $("#cluster-info").innerHTML = [
     ["Cluster ID", `<span class="mono">${esc(c.cluster_id)}</span>`],
     ["CA fingerprint", `<span class="mono">${esc(c.ca_fp)}</span>`],
@@ -437,6 +491,18 @@ function renderSettings() {
   const pill = $("#mode-pill");
   pill.textContent = c.adoption_mode === "auto" ? "Auto-adopt on" : "Approval required";
   pill.className = `pill ${c.adoption_mode === "auto" ? "s-adopted" : "s-pending"}`;
+}
+
+async function setFans(boost) {
+  try {
+    await api("PUT", "/api/v1/settings", { fans: boost ? "boost" : "firmware" });
+    state.cluster.fans = boost ? "boost" : "firmware";
+    toast(boost ? "Nodes that allow it now run their fans harder" : "Fans are back under each machine's firmware");
+  } catch (e) {
+    if (e instanceof AuthError) return showLogin();
+    toast(e.message, true);
+  }
+  renderSettings();
 }
 
 async function setIGPU(on) {
@@ -697,6 +763,7 @@ function wire() {
     r.addEventListener("change", () => setMode(r.value));
   }
   $("#igpu-on").addEventListener("change", e => setIGPU(e.target.checked));
+  $("#fans-boost").addEventListener("change", e => setFans(e.target.checked));
 
   window.addEventListener("hashchange", route);
   document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("#app").hidden) refresh(); });

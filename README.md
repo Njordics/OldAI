@@ -33,6 +33,7 @@ OldAI turns a pile of forgotten desktops (the HP in the closet, the ex-gaming to
 - 🔍 Slaves **find the Controller on their own**, get adopted, and from then on talk only over **mTLS**.
 - 🧩 Models too big for one box get **pooled** across several nodes over llama.cpp's RPC.
 - 🎮 **GPUs just work:** NVIDIA cards get the right driver from Ubuntu's archive, and Intel and AMD graphics (yes, the ones built into laptops and mini PCs) get Mesa's Vulkan driver. The Slave installs it through the Controller, no internet needed.
+- 🌡️ **Keeps its cool:** every node reports its temperatures, hot nodes get fewer requests, and nodes that allow it can run their fans harder under load.
 - 🔄 **One-button updates** roll the whole cluster forward, Controller first, then each Slave in turn, with automatic rollback.
 
 All of it runs on your LAN. Slaves never touch the internet. Your prompts never leave the building. 🏠

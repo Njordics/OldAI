@@ -23,6 +23,7 @@ import (
 	"aicluster/slave-agent/inventory"
 	"aicluster/slave-agent/netcfg"
 	"aicluster/slave-agent/runtime"
+	"aicluster/slave-agent/thermal"
 )
 
 // Config is the agent's local configuration. Everything else comes from the
@@ -80,6 +81,10 @@ type Config struct {
 	Drivers DriverSystem
 	// ScanGPUs replaces the PCI scan (tests).
 	ScanGPUs func() []proto.GPUInfo
+	// Thermal reads temperatures (default: this machine's). Fans drives
+	// fans when the Controller asks; nil means this node can't.
+	Thermal *thermal.Monitor
+	Fans    *thermal.FanController
 }
 
 func (c *Config) defaults() {
@@ -163,8 +168,9 @@ type Agent struct {
 	net    netState
 	netC   chan struct{}
 
-	upd updState
-	drv drvState
+	upd   updState
+	drv   drvState
+	therm thermState
 }
 
 func New(cfg Config, log *slog.Logger) (*Agent, error) {
@@ -186,6 +192,12 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	a.loadManaged()
 	a.initNetwork()
 	a.initUpdate()
+	if cfg.Fans != nil {
+		// Fans a crashed agent left boosted go back to the firmware.
+		if err := thermal.RestoreFromFile(cfg.Fans.StateFile); err != nil {
+			log.Warn("restore fans", "err", err)
+		}
+	}
 	a.pools.entries = map[string]*poolEntry{}
 	switch cfg.Runtime {
 	case "ollama":
@@ -305,7 +317,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	tlsLn := tls.NewListener(a.ln, a.serverTLS())
 
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator, a.serveShim, a.modelLoop, a.netLoop, a.updateLoop, a.driverLoop} {
+	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator, a.serveShim, a.modelLoop, a.netLoop, a.updateLoop, a.driverLoop, a.thermalLoop} {
 		wg.Add(1)
 		go func() { defer wg.Done(); loop(ctx) }()
 	}

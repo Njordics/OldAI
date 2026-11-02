@@ -254,8 +254,9 @@ func hasNvidia(n *store.Node) bool {
 }
 
 // mergeObservedGPUs replaces the inventory's GPU list with the one the agent
-// reports, which has memory and model names once a driver is loaded. It
-// reports whether anything changed.
+// reports, which has memory and model names once a driver is loaded, and
+// drops cards that were removed. nil means an agent too old to report it.
+// It reports whether anything changed.
 func mergeObservedGPUs(n *store.Node, gpus []proto.GPUInfo) bool {
 	if gpus == nil {
 		return false

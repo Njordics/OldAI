@@ -131,6 +131,8 @@ type ClusterInfo struct {
 	SlaveNet     *SlaveNetInfo `json:"slave_net,omitempty"`
 	// IntegratedGPUs: nodes may run models on GPUs built into their CPU.
 	IntegratedGPUs bool `json:"integrated_gpus"`
+	// Fans: "firmware" or "boost" (§15).
+	Fans string `json:"fans"`
 }
 
 // SlaveNetInfo describes the Controller's own subnet for Slaves (§12).
@@ -151,6 +153,7 @@ func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {
 		GatewayURLs:  s.gatewayURLs(),
 
 		IntegratedGPUs: s.core.UseIntegratedGPUs(r.Context()),
+		Fans:           s.core.FanMode(r.Context()),
 	}
 	if n := s.core.SlaveNet(); n != nil {
 		info.SlaveNet = &SlaveNetInfo{Subnet: n.Subnet.String(), ControllerIP: n.ControllerIP.String(), Iface: n.Iface, Domain: n.Domain}
@@ -241,6 +244,8 @@ type Settings struct {
 	UpdateBranch string `json:"update_branch,omitempty"`
 	// IntegratedGPUs turns the use of integrated GPUs on or off (§14).
 	IntegratedGPUs *bool `json:"integrated_gpus,omitempty"`
+	// Fans is "firmware" or "boost" (§15).
+	Fans string `json:"fans,omitempty"`
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +253,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	igpu := s.core.UseIntegratedGPUs(r.Context())
 	httpx.WriteJSON(w, http.StatusOK, Settings{
 		AdoptionMode: s.core.Mode(), UpdateCheck: &u.Enabled, UpdateRepo: u.Repo, UpdateBranch: u.Branch,
-		IntegratedGPUs: &igpu,
+		IntegratedGPUs: &igpu, Fans: s.core.FanMode(r.Context()),
 	})
 }
 
@@ -260,6 +265,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AdoptionMode != "" {
 		if err := s.core.SetMode(r.Context(), req.AdoptionMode); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, proto.ErrBadRequest, err.Error())
+			return
+		}
+	}
+	if req.Fans != "" {
+		if err := s.core.SetFanMode(r.Context(), req.Fans); err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, proto.ErrBadRequest, err.Error())
 			return
 		}

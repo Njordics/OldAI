@@ -148,7 +148,7 @@ func (a *Agent) observed() *proto.ObservedState {
 		Network:            a.observedNetworkLocked(),
 		Update:             update,
 		Driver:             a.observedDriver(),
-		GPUs:               a.inv.GPUs,
+		GPUs:               append([]proto.GPUInfo{}, a.inv.GPUs...), // [] when none, never null
 	}
 }
 

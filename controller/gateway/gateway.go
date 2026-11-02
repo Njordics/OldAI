@@ -331,6 +331,9 @@ func (g *Gateway) acquire(ctx context.Context, reps []core.Replica, tried map[st
 			if !r.Loaded {
 				score += 1 // loading costs seconds; use only if nothing loaded is free
 			}
+			if r.Hot {
+				score += 0.5 // throttling for heat: prefer a cooler node with room
+			}
 			if best == nil || score < bestScore {
 				best, bestScore = r, score
 			}

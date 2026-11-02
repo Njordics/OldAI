@@ -187,6 +187,8 @@ type DesiredState struct {
 	// Drivers is the GPU driver the Controller picked for this node's cards
 	// (§14). Absent: leave the node's drivers alone.
 	Drivers *DriverSpec `json:"drivers,omitempty"`
+	// Fans: absent or "firmware" leaves the fans to the board.
+	Fans *FanSpec `json:"fans,omitempty"`
 }
 
 // DriverSpec names Ubuntu packages for a GPU driver. The agent installs them
@@ -375,8 +377,10 @@ type ObservedState struct {
 	Update             *ObservedUpdate   `json:"update,omitempty"`
 	Driver             *ObservedDriver   `json:"driver,omitempty"`
 	// GPUs is the node's current GPU list. The Controller replaces the
-	// inventory's with it, so cards show their memory once a driver loads.
-	GPUs []GPUInfo `json:"gpus,omitempty"`
+	// inventory's with it, so cards show their memory once a driver loads
+	// and removed cards disappear. Always sent, [] when there are none;
+	// absent means an agent too old to report it.
+	GPUs []GPUInfo `json:"gpus"`
 }
 
 // Versions keys besides "agent", "kernel", "os" and "runtime".
@@ -405,6 +409,54 @@ type Health struct {
 	DiskFree  uint64        `json:"disk_free"`
 	GPUs      []GPUHealth   `json:"gpus"`
 	Inference InferenceLoad `json:"inference"`
+	// Thermal is absent from agents older than temperature reporting (§15).
+	Thermal *Thermal `json:"thermal,omitempty"`
+}
+
+// Thermal is the node's temperatures and fans (§15).
+type Thermal struct {
+	// CPUTempC is the hottest CPU package or die; 0 when unknown.
+	CPUTempC float64 `json:"cpu_temp_c"`
+	// Throttled: the CPU slowed itself down because of heat since the last
+	// heartbeat.
+	Throttled bool     `json:"throttled"`
+	Sensors   []Sensor `json:"sensors,omitempty"`
+	Fans      []Fan    `json:"fans,omitempty"`
+	// FanControl is "yes" when the agent can drive at least one fan, else
+	// why not.
+	FanControl string `json:"fan_control"`
+}
+
+// Sensor is one temperature reading.
+type Sensor struct {
+	Chip  string  `json:"chip"` // hwmon driver, e.g. coretemp, k10temp, nvme, amdgpu, nvidia
+	Label string  `json:"label"`
+	TempC float64 `json:"temp_c"`
+	// CritC is the hardware's critical temperature, when it reports one.
+	CritC float64 `json:"crit_c,omitempty"`
+}
+
+// Fan is one fan the node can see.
+type Fan struct {
+	ID    string `json:"id"` // e.g. nct6798/fan2
+	Label string `json:"label,omitempty"`
+	RPM   int    `json:"rpm"`
+	// Duty is the PWM output in percent, when readable.
+	Duty int `json:"duty,omitempty"`
+	// Control: "firmware" (the board runs it), "agent" (boosted by the
+	// agent) or "fixed" (no PWM the agent can set).
+	Control string `json:"control"`
+}
+
+// Fan modes in FanSpec.Mode.
+const (
+	FansFirmware = "firmware"
+	FansBoost    = "boost"
+)
+
+// FanSpec tells the agent how to run the node's fans (§15).
+type FanSpec struct {
+	Mode string `json:"mode"` // firmware | boost
 }
 
 type GPUHealth struct {
