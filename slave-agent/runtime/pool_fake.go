@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 type FakePool struct {
 	Label      string
 	TokenDelay time.Duration
+	WorkerErr  string // when set, workers fail to start with this error
 }
 
 func (f *FakePool) Kind() string { return "fake" }
@@ -36,6 +38,9 @@ func (p *fakeProc) Done() <-chan struct{} { return p.done }
 func (p *fakeProc) Stop()                 { p.once.Do(func() { p.stop(); close(p.done) }) }
 
 func (f *FakePool) StartWorker(ctx context.Context) (Proc, error) {
+	if f.WorkerErr != "" {
+		return nil, errors.New(f.WorkerErr)
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err

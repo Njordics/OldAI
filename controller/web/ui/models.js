@@ -129,9 +129,13 @@ function copiesOf(as) {
 
 function poolRow(members) {
   const leader = members.find(m => m.role === "leader") || members[0];
-  const failed = members.find(m => m.state === "failed");
+  // A worker's own error is the cause; the leader only reports "not ready".
+  const failed = members.find(m => m.state === "failed" && m.role !== "leader") || members.find(m => m.state === "failed");
   let st;
-  if (failed) st = statusOf(failed);
+  if (failed) {
+    st = statusOf(failed);
+    if (members.length > 1) st.detail = `<span class="note bad">${esc(failed.node_name || failed.node_id.slice(0, 8))}: ${esc(failed.error || "")}</span>`;
+  }
   else if (members.every(m => m.state === "loaded")) st = { cls: "s-adopted", label: "Ready" };
   else if (["fetching", "downloading", "loading"].includes(leader.state)) st = statusOf(leader);
   else if (members.some(m => m.state === "offline")) st = { cls: "s-offline", label: "A member node is offline" };

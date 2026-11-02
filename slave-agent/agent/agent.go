@@ -69,6 +69,8 @@ type Config struct {
 	InferenceSlots int
 	// FakeLabel names this node in the fake runtime's replies.
 	FakeLabel string
+	// FakePoolWorkerErr makes the fake runtime's pool workers fail to start.
+	FakePoolWorkerErr string
 	// LlamaCppDir holds llama.cpp's rpc-server and llama-server, used for
 	// models split across nodes.
 	LlamaCppDir string
@@ -220,7 +222,7 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		if f.Label = cfg.FakeLabel; f.Label == "" {
 			f.Label, _ = os.Hostname()
 		}
-		a.poolRT = &runtime.FakePool{Label: f.Label, TokenDelay: f.TokenDelay}
+		a.poolRT = &runtime.FakePool{Label: f.Label, TokenDelay: f.TokenDelay, WorkerErr: cfg.FakePoolWorkerErr}
 		a.rt = f
 	case "none":
 	default:

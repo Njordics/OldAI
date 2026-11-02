@@ -56,6 +56,22 @@ func (e *poolEntry) stop() {
 type poolState struct {
 	mu      sync.Mutex
 	entries map[string]*poolEntry // by assignment ID
+	failed  map[string]string     // group -> why this node's worker isn't running
+}
+
+// workerFailed records why this node can't serve as a worker in a pool, so
+// the leader's probe can say so instead of only "not a worker".
+func (a *Agent) workerFailed(group, why string) {
+	a.pools.mu.Lock()
+	defer a.pools.mu.Unlock()
+	if why == "" {
+		delete(a.pools.failed, group)
+		return
+	}
+	if a.pools.failed == nil {
+		a.pools.failed = map[string]string{}
+	}
+	a.pools.failed[group] = why
 }
 
 func (a *Agent) poolEntry(id string) *poolEntry {
@@ -104,6 +120,7 @@ func (a *Agent) reconcilePools(ctx context.Context, desired []proto.DesiredModel
 	}
 	if a.poolRT == nil {
 		for _, dm := range want {
+			a.workerFailed(dm.Pool.GroupID, "no pool runtime configured")
 			a.setObs(dm, "", func(o *proto.ObservedModel) {
 				o.Role, o.State, o.Error = dm.Role, proto.ModelFailed, "no pool runtime configured"
 			})
@@ -112,6 +129,7 @@ func (a *Agent) reconcilePools(ctx context.Context, desired []proto.DesiredModel
 	}
 	if err := a.poolRT.Check(); err != nil {
 		for _, dm := range want {
+			a.workerFailed(dm.Pool.GroupID, err.Error())
 			a.setObs(dm, "", func(o *proto.ObservedModel) { o.Role, o.State, o.Error = dm.Role, proto.ModelFailed, err.Error() })
 		}
 		return
@@ -140,6 +158,7 @@ func (a *Agent) reconcileWorker(ctx context.Context, dm proto.DesiredModel) {
 	}
 	proc, err := a.poolRT.StartWorker(ctx)
 	if err != nil {
+		a.workerFailed(dm.Pool.GroupID, "rpc-server: "+err.Error())
 		a.setObs(dm, "", func(o *proto.ObservedModel) {
 			o.Role, o.State, o.Error = dm.Role, proto.ModelFailed, "rpc-server: "+err.Error()
 		})
@@ -151,6 +170,7 @@ func (a *Agent) reconcileWorker(ctx context.Context, dm proto.DesiredModel) {
 		leader: dm.Pool.Leader, epoch: strconv.FormatInt(time.Now().UnixNano(), 36),
 	}
 	a.pools.mu.Unlock()
+	a.workerFailed(dm.Pool.GroupID, "")
 	a.log.Info("pool worker ready", "model", dm.ModelID, "leader", dm.Pool.Leader)
 	a.setObs(dm, "", func(o *proto.ObservedModel) { o.Role, o.State, o.Error, o.Progress = dm.Role, proto.ModelLoaded, "", 1 })
 }
@@ -534,6 +554,7 @@ func (a *Agent) handleRPCTunnel(w http.ResponseWriter, r *http.Request) {
 			entry = e
 		}
 	}
+	why := a.pools.failed[group]
 	a.pools.mu.Unlock()
 	fail := func(status int, msg string) {
 		w.Header().Set("Content-Type", "application/json")
@@ -541,6 +562,10 @@ func (a *Agent) handleRPCTunnel(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 	}
 	if entry == nil {
+		if why != "" {
+			fail(http.StatusServiceUnavailable, why)
+			return
+		}
 		fail(http.StatusNotFound, "this node is not a worker in that pool")
 		return
 	}

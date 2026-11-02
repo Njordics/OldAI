@@ -19,6 +19,7 @@ import (
 	"aicluster/controller/core"
 	"aicluster/controller/gateway"
 	"aicluster/controller/store"
+	"aicluster/slave-agent/agent"
 )
 
 func adoptAll(t *testing.T, c *ctrl, ss ...*slave) {
@@ -182,6 +183,36 @@ func TestPoolNeedsTwoNodes(t *testing.T) {
 	var fe *core.FitError
 	if !errors.As(err, &fe) {
 		t.Fatalf("single-node pool: %v", err)
+	}
+}
+
+// A worker that can't start says why, and the leader passes that on
+// instead of only "not a worker in that pool".
+func TestPoolWorkerFailureReported(t *testing.T) {
+	requireProvisioner(t)
+	c := startController(t, core.ModeAuto)
+	const why = "libggml.so.0: file too short"
+	broken := func(cfg *agent.Config) { cfg.FakePoolWorkerErr = why }
+	s1, s2 := startSlave(t, c, broken), startSlave(t, c, broken)
+	adoptAll(t, c, s1, s2)
+	rows, err := c.Install(context.Background(), core.InstallRequest{ModelID: "qwen2.5:0.5b", Nodes: []string{s1.NodeID(), s2.NodeID()}, Pool: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.Role != store.RoleLeader {
+			c.waitModel(t, r.ID, proto.ModelFailed)
+			continue
+		}
+		waitFor(t, modelTimeout, "the leader to report the worker's error", func() bool {
+			ms, _ := c.ModelStatuses(context.Background())
+			for _, m := range ms {
+				if m.ID == r.ID {
+					return m.State == proto.ModelFailed && strings.Contains(m.Error, why)
+				}
+			}
+			return false
+		})
 	}
 }
 
