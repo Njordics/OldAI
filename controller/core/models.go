@@ -73,7 +73,11 @@ func fitNode(n *store.Node, assigns []*store.Assignment) provision.FitNode {
 	if json.Unmarshal(n.Inventory, &inv) == nil {
 		fn.RAMTotal = int64(inv.Memory.Total)
 		for _, g := range inv.GPUs {
-			fn.GPUs = append(fn.GPUs, provision.GPU{VRAM: int64(g.VRAM)})
+			// Integrated GPUs use the node's RAM, already counted; a card
+			// without a working driver can't hold a model yet.
+			if !g.Integrated && g.Compute.API != "" && g.Compute.API != "none" {
+				fn.GPUs = append(fn.GPUs, provision.GPU{VRAM: int64(g.VRAM)})
+			}
 		}
 		for _, d := range inv.Disks {
 			fn.DiskFree = int64(d.Free)
@@ -405,7 +409,7 @@ func (c *Core) SyncDesired(ctx context.Context, nodeID string) {
 		desired.V, desired.NodeName = proto.Version, n.Name
 		desired.Models, desired.Runtimes, desired.Network, desired.Update = models, runtimes, network, update
 		// A driver may need a reboot into a newer kernel (§14).
-		desired.Drivers, desired.AllowReboot = drv, drv != nil
+		desired.Drivers, desired.AllowReboot = drv, drv != nil && drv.Vendor == "nvidia"
 		desired.GCGraceS = int(c.cfg.ModelGCGrace / time.Second)
 		desired.Generation = n.DesiredGen + 1
 		n.DesiredGen = desired.Generation

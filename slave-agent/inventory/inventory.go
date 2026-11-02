@@ -187,14 +187,17 @@ func pciGPUs() []proto.GPUInfo {
 		}
 		dev := strings.TrimPrefix(readFile(filepath.Join(d, "device")), "0x")
 		vid := strings.TrimPrefix(readFile(filepath.Join(d, "vendor")), "0x")
-		out = append(out, proto.GPUInfo{
+		g := proto.GPUInfo{
 			Index:    len(out),
 			Vendor:   vendor,
+			Model:    pciName(vid, dev),
 			PCIID:    vid + ":" + dev,
 			BusID:    filepath.Base(d),
 			Modalias: readFile(filepath.Join(d, "modalias")),
 			Driver:   proto.GPUDriver{Installed: computeDrivers[readLink(filepath.Join(d, "driver"))]},
-		})
+		}
+		describeGPU(&g, d)
+		out = append(out, g)
 	}
 	return out
 }

@@ -139,9 +139,9 @@ Not tested: physical hardware, booting from USB, GPUs, spinning disks (the non-d
 
 ## GPU drivers
 
-No GPU drivers are in the image. When a Slave has an NVIDIA card, the Controller picks the driver from Ubuntu's archive and the Slave installs it through the Controller, then reboots once if the driver needs a newer kernel. The Controller needs internet the first time; later Slaves with the same card get it from the Controller's copy. Node details in the dashboard show the driver's progress. Details: [protocol.md §14](protocol.md#14-gpu-drivers).
+No GPU drivers are in the image. When a Slave has an NVIDIA card, the Controller picks the driver from Ubuntu's archive and the Slave installs it through the Controller, then reboots once if the driver needs a newer kernel. Intel and AMD graphics, including those built into the processor, get Mesa's Vulkan driver the same way, without a reboot. Settings → GPUs turns the use of built-in graphics off, for older chips where they are slower than the processor. The Controller needs internet the first time; later Slaves with the same card get it from the Controller's copy. Node details in the dashboard show the driver's progress. Details: [protocol.md §14](protocol.md#14-gpu-drivers).
 
 ## Not covered yet
 
-- **AMD and Intel GPUs:** no drivers yet, so those Slaves run models on the CPU. NVIDIA cards get their driver through the Controller (below).
+- **Pooled models on GPUs:** the llama.cpp in the image is the CPU build, so models split across nodes run on their CPUs.
 - **Raw USB image:** writing the ISO to a stick with `dd` or a USB imager works, because Ubuntu's ISO is hybrid. A separate raw image is not built.

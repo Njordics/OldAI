@@ -22,7 +22,9 @@ func (r *rebootDrivers) Installed(context.Context, []string) bool { return true 
 func (r *rebootDrivers) Install(context.Context, proto.DriverSpec, string) error {
 	return nil
 }
-func (r *rebootDrivers) Load(context.Context) (string, error) { return "", r.loadErr }
+func (r *rebootDrivers) Load(context.Context, proto.DriverSpec) (string, error) {
+	return "", r.loadErr
+}
 func (r *rebootDrivers) Reboot() error                        { r.reboots++; return nil }
 func (r *rebootDrivers) RestartRuntime(context.Context) error { return nil }
 

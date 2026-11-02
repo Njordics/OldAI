@@ -284,6 +284,13 @@
       </div>
 
       <div class="card">
+        <h2>GPUs</h2>
+        <p class="muted">NVIDIA cards get their driver from Ubuntu through the Controller. Intel and AMD graphics get Mesa's Vulkan driver.</p>
+        <label class="check"><input type="checkbox" id="igpu-on"> Run models on graphics built into the processor</label>
+        <p class="hint">Integrated Intel and AMD graphics share the node's memory. On recent chips (Intel Iris Xe and Arc, AMD Radeon 680M and newer) they answer faster than the processor alone; on older ones, like Intel UHD 600-series, they can be slower. Turn this off if replies get slower.</p>
+      </div>
+
+      <div class="card">
         <h2>Updates</h2>
         <p class="muted">The Controller can check the project's GitHub repository for newer code and tell you here. It sends one anonymous request every few hours and nothing about your cluster.</p>
         <form id="update-form" class="update-form">

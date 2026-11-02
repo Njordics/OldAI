@@ -193,14 +193,17 @@ type DesiredState struct {
 // with apt from the Controller's copy of Ubuntu's archive, so Ubuntu's
 // signatures are checked on the node itself.
 type DriverSpec struct {
-	Vendor   string   `json:"vendor"`   // nvidia
-	Name     string   `json:"name"`     // e.g. nvidia-driver-580-server-open
+	Vendor   string   `json:"vendor"`   // nvidia | intel | amd
+	Name     string   `json:"name"`     // e.g. nvidia-driver-580-server-open, mesa-vulkan-drivers
 	Version  string   `json:"version"`  // Ubuntu package version
 	Packages []string `json:"packages"` // to install, kernel modules included
 	// Mirror is the archive's path on the node API, e.g. /apt/ubuntu.
 	Mirror     string   `json:"mirror"`
 	Suites     []string `json:"suites"`     // e.g. noble noble-updates noble-security
 	Components []string `json:"components"` // e.g. main restricted
+	// UseIntegrated lets the runtime use integrated GPUs (Intel and AMD
+	// graphics built into the CPU), which share the node's RAM.
+	UseIntegrated bool `json:"use_integrated,omitempty"`
 }
 
 // Driver states in ObservedDriver.State.

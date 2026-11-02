@@ -364,7 +364,8 @@ Controller generates new CA, cross-signs it with the old one, then for each node
 | RAM | `/proc/meminfo` |
 | Disk | `statfs` on model dir |
 | GPU (pre-driver) | PCI scan of `/sys/bus/pci/devices/*` class `0x03xx`, vendor `10de`/`1002`/`8086`: PCI ID, bus address and `modalias`. No model name or memory until a driver is loaded. |
-| GPU (post-driver) | NVIDIA: `nvidia-smi --query-gpu=pci.bus_id,name,memory.total,driver_version,compute_cap`. AMD and Intel: not yet. |
+| GPU names | `/usr/share/misc/pci.ids` |
+| GPU (post-driver) | NVIDIA: `nvidia-smi --query-gpu=pci.bus_id,name,memory.total,driver_version,compute_cap`. Intel and AMD: `compute.api = "vulkan"` once the kernel driver is bound, a render node exists and Mesa's Vulkan driver is installed; AMD memory from `mem_info_vram_total`. |
 | CUDA capability | `nvidia-smi`'s `compute_cap` |
 | Network speed | `/sys/class/net/*/speed`, physical interfaces only |
 
@@ -582,23 +583,26 @@ The dashboard's **Update Controller and Slaves now** button installs the branch'
 
 ## 14. GPU drivers
 
-Slaves have no internet, so the Controller picks each node's GPU driver and serves Ubuntu's archive to it. Only NVIDIA cards are handled so far.
+Slaves have no internet, so the Controller picks each node's GPU driver and serves Ubuntu's archive to it. NVIDIA cards get NVIDIA's driver. Intel and AMD GPUs, including the graphics built into many laptop and small-desktop processors, get Mesa's Vulkan driver, which Ollama uses.
 
 **Identify.** The agent reports each card's PCI `modalias` (§6.1) in its inventory, and its current GPU list in `observed.gpus`. The Controller replaces the stored inventory's GPUs with that list, so a card shows its model and memory once its driver loads, and the provisioner can place models on it.
 
-**Pick** (Controller, `controller/drivers`):
+**Pick for NVIDIA** (Controller, `controller/drivers`):
 1. It reads `restricted/binary-amd64/Packages.gz` for the node's release (`host.codename`, default `noble`) and its `-updates` and `-security` pockets, keeping the newest version of each package. It reads them through its archive copy, and again every 12 hours.
 2. Ubuntu's `nvidia-driver-<branch>[-server][-open]` packages list the cards they support as modalias patterns, the same data `ubuntu-drivers` uses. Every NVIDIA card on the node must match.
 3. Like `ubuntu-drivers --gpgpu`, it prefers the `-server` (long-term support) line, then the newest branch, then NVIDIA's open kernel modules. The open modules only list the cards that support them (Turing and newer).
 4. The packages are the headless driver without DKMS, `nvidia-utils` for `nvidia-smi`, and Canonical's prebuilt, signed kernel modules for the node's kernel line: `linux-modules-nvidia-<suffix>-generic` for Ubuntu's main kernel, `-generic-hwe-24.04` or `-generic-<x.y>` for the others, chosen by which kernel series each one depends on. Signed modules load with Secure Boot on, and nothing is compiled on the node.
 5. It puts the result in `desired.drivers` and sets `allow_reboot`. When no driver supports a card, `drivers` is left out and the dashboard shows why.
 
+**Pick for Intel and AMD.** When a node has no NVIDIA card but has an Intel or AMD GPU, the Controller asks for `mesa-vulkan-drivers` and `libvulkan1` from Ubuntu's main component, with `allow_reboot` off: the kernel drivers (`i915`/`xe`, `amdgpu`) are already in Ubuntu's kernel. `use_integrated` carries the Settings switch for integrated GPUs (on by default). A node with both an NVIDIA card and integrated graphics gets only the NVIDIA driver.
+
 **Install** (agent, as root):
 1. It writes its own source list pointing at `http://127.0.0.1:7452/apt/ubuntu` (the loopback shim, which forwards to the Controller over mTLS), `signed-by` Ubuntu's archive keyring. Its package lists live in `/var/lib/aicluster/apt`, so the node's normal apt sources are neither used nor changed.
 2. It runs `apt-get update` and `apt-get install --no-install-recommends` with the packages. apt checks the archive's signature and every file's hash, so the Controller can't alter what gets installed.
 3. If the running kernel has no module for the driver, or `nouveau` holds the card, it reports `rebooting` and reboots (blocking `nouveau` first if needed). The module packages pin the newest kernel of their line, so a node installed from an older ISO reboots into that kernel. It reboots once per driver; if the module still won't load after that, it reports `failed`. Without `allow_reboot` it reports `reboot_required` and waits.
-4. It loads `nvidia` and `nvidia_uvm`, checks `nvidia-smi`, rescans the GPUs, restarts Ollama so it finds them, and reports `ready` with the driver version.
-5. A failed install is tried again after 30 minutes. When the packages are already installed it only loads the driver. Upgrading an installed driver isn't done yet.
+4. NVIDIA: it loads `nvidia` and `nvidia_uvm` and checks `nvidia-smi`. Intel and AMD: it checks that the card runs `i915`, `xe` or `amdgpu` and has a render node, and that Mesa's Vulkan driver for it is installed. It then writes `/etc/systemd/system/ollama.service.d/aicluster-gpu.conf`, which gives Ollama the `render` and `video` groups, `CAP_PERFMON` (so Vulkan can report memory use, per Ollama's docs) and `OLLAMA_IGPU_ENABLE` from `use_integrated`; Ollama skips integrated GPUs without it.
+5. It rescans the GPUs, restarts Ollama so it finds them, and reports `ready` with the driver version.
+6. Before installing it finishes any interrupted dpkg run, waiting up to 10 minutes for dpkg's lock, which Ubuntu's own daily apt jobs hold for a few seconds after boot. A failed install is tried again after 30 minutes. When the packages are already installed it only loads the driver. Upgrading an installed driver isn't done yet.
 
 **Archive copy** (`GET /apt/ubuntu/…` on the node API):
 - It fetches from `--apt-mirror` (default `http://archive.ubuntu.com/ubuntu`) into `<data dir>/apt`. An empty `--apt-mirror` turns GPU drivers off.
@@ -607,4 +611,6 @@ Slaves have no internet, so the Controller picks each node's GPU driver and serv
 - Concurrent requests for one file share a single download, and a second node with the same card gets everything from the Controller's copy.
 - Offline mode serves only what is already cached.
 
-**Tested:** a Slave VM without internet, reporting an RTX 4090's modalias (a VM can't have the real card), got `nvidia-driver-580-server-open`. It installed it and kernel 6.8.0-147 through the Controller, rebooted once from 6.8.0-139, and then failed at `modprobe nvidia: No such device`, as it should without the card. Not tested: a real NVIDIA card.
+**Memory.** Integrated GPUs (Intel's at `00:02.0`, AMD's with under 2 GiB of dedicated memory) are marked `integrated`: they use the node's RAM, so the planner keeps budgeting models from RAM and doesn't count that memory twice. Discrete AMD cards report their memory from `mem_info_vram_total`. The planner counts a GPU's memory only once its driver works (`compute.api` set). Intel Arc cards are used by Ollama, but their memory isn't read yet, so the planner budgets from RAM for them.
+
+**Tested:** a Slave VM without internet, reporting an RTX 4090's modalias (a VM can't have the real card), got `nvidia-driver-580-server-open`. It installed it and kernel 6.8.0-147 through the Controller, rebooted once from 6.8.0-139, and then failed at `modprobe nvidia: No such device`, as it should without the card. A second run reported an Intel UHD 630: the node installed Mesa through the Controller in about 12 seconds, without a reboot, and then reported that no `i915`/`xe` driver was loaded, which is right in a VM. With Mesa installed and integrated GPUs allowed, Ollama found no Vulkan devices and stayed on the CPU, so Mesa's software renderer (`llvmpipe`) isn't mistaken for a GPU. Not tested: a real NVIDIA, Intel or AMD GPU.

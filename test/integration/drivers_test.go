@@ -113,7 +113,7 @@ func (f *fakeDrivers) Install(ctx context.Context, spec proto.DriverSpec, base s
 	return nil
 }
 
-func (f *fakeDrivers) Load(context.Context) (string, error) {
+func (f *fakeDrivers) Load(context.Context, proto.DriverSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.loaded = true
@@ -156,7 +156,7 @@ func TestGPUDriverInstall(t *testing.T) {
 	gpu := startSlave(t, c, func(cfg *agent.Config) { cfg.Drivers, cfg.ScanGPUs = fd, fd.gpus })
 	// A node with an NVIDIA card but no way to install drivers says so.
 	unable := startSlave(t, c, func(cfg *agent.Config) { cfg.ScanGPUs = (&fakeDrivers{}).gpus })
-	// An AMD card isn't handled yet: no driver is asked for.
+	// A discrete AMD card gets Mesa's Vulkan driver.
 	amd := startSlave(t, c, func(cfg *agent.Config) {
 		cfg.Drivers = &fakeDrivers{}
 		cfg.ScanGPUs = func() []proto.GPUInfo {
@@ -195,8 +195,8 @@ func TestGPUDriverInstall(t *testing.T) {
 		d := observedOf(t, c, unable.NodeID()).Driver
 		return d != nil && d.State == proto.DriverFailed && strings.Contains(d.Error, "can't install drivers")
 	})
-	if d := ds0(t, c, amd.NodeID()); d != nil || observedOf(t, c, amd.NodeID()).Driver != nil {
-		t.Fatalf("AMD node got a driver: %+v", d)
+	if d := ds0(t, c, amd.NodeID()); d == nil || d.Vendor != "amd" || d.Name != "mesa-vulkan-drivers" {
+		t.Fatalf("AMD node's driver: %+v", d)
 	}
 
 	// The second fetch of the release file is served from the Controller's copy.
@@ -216,4 +216,68 @@ func ds0(t *testing.T, c *ctrl, id string) *proto.DriverSpec {
 	var ds proto.DesiredState
 	_ = json.Unmarshal(c.node(t, id).Desired, &ds)
 	return ds.Drivers
+}
+
+// An Intel integrated GPU gets Mesa's Vulkan driver, no reboot, and the
+// Settings switch reaches the node.
+func TestIntegratedGPUDriver(t *testing.T) {
+	archive, _ := fakeArchive(t)
+	c := startController(t, core.ModeAuto, func(cfg *core.Config) { cfg.AptMirror = archive.URL + "/ubuntu" })
+
+	fd := &fakeDrivers{}
+	var mu sync.Mutex
+	var specs []proto.DriverSpec
+	igpu := startSlave(t, c, func(cfg *agent.Config) {
+		cfg.Drivers = &recordingDrivers{fakeDrivers: fd, onLoad: func(s proto.DriverSpec) { mu.Lock(); specs = append(specs, s); mu.Unlock() }}
+		cfg.ScanGPUs = func() []proto.GPUInfo {
+			g := proto.GPUInfo{Vendor: "intel", PCIID: "8086:3e92", BusID: "0000:00:02.0", Integrated: true,
+				Modalias: "pci:v00008086d00003E92sv0000103Csd00008767bc03sc00i00", Driver: proto.GPUDriver{Installed: true}}
+			fd.mu.Lock()
+			if fd.loaded {
+				g.Compute = proto.GPUCompute{API: "vulkan"}
+			}
+			fd.mu.Unlock()
+			return []proto.GPUInfo{g}
+		}
+	})
+	adoptAll(t, c, igpu)
+
+	waitFor(t, 30*time.Second, "the Vulkan driver to be ready", func() bool {
+		d := observedOf(t, c, igpu.NodeID()).Driver
+		return d != nil && d.State == proto.DriverReady
+	})
+	var ds proto.DesiredState
+	_ = json.Unmarshal(c.node(t, igpu.NodeID()).Desired, &ds)
+	if ds.Drivers == nil || ds.Drivers.Vendor != "intel" || ds.Drivers.Name != "mesa-vulkan-drivers" ||
+		!ds.Drivers.UseIntegrated || ds.AllowReboot {
+		t.Fatalf("desired: %+v allow_reboot=%v", ds.Drivers, ds.AllowReboot)
+	}
+	waitFor(t, 10*time.Second, "the inventory to show Vulkan", func() bool {
+		var inv proto.Inventory
+		_ = json.Unmarshal(c.node(t, igpu.NodeID()).Inventory, &inv)
+		return len(inv.GPUs) == 1 && inv.GPUs[0].Compute.API == "vulkan" && inv.Accel.Best == "vulkan"
+	})
+
+	// Turning integrated GPUs off reaches the node, which applies it.
+	if err := c.SetUseIntegratedGPUs(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 20*time.Second, "the node to apply the switch", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(specs) >= 2 && !specs[len(specs)-1].UseIntegrated
+	})
+	if d := ds0(t, c, igpu.NodeID()); d == nil || d.UseIntegrated {
+		t.Fatalf("desired after switching off: %+v", d)
+	}
+}
+
+type recordingDrivers struct {
+	*fakeDrivers
+	onLoad func(proto.DriverSpec)
+}
+
+func (r *recordingDrivers) Load(ctx context.Context, s proto.DriverSpec) (string, error) {
+	r.onLoad(s)
+	return r.fakeDrivers.Load(ctx, s)
 }

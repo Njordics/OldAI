@@ -15,8 +15,10 @@ import (
 
 // GPU drivers (protocol §14). The Controller names the Ubuntu packages for
 // this node's cards; the agent installs them with apt from the Controller's
-// copy of Ubuntu's archive, reached through the loopback shim, loads the
-// kernel module and reboots when the module is for a newer kernel.
+// copy of Ubuntu's archive, reached through the loopback shim. For NVIDIA it
+// loads the kernel module and reboots when the module is for a newer kernel;
+// for Intel and AMD it checks the card is usable through Vulkan and lets the
+// runtime use it.
 
 // DriverSystem installs GPU drivers. AptDrivers is the real one.
 type DriverSystem interface {
@@ -24,9 +26,9 @@ type DriverSystem interface {
 	Installed(ctx context.Context, pkgs []string) bool
 	// Install installs spec's packages from the archive at baseURL.
 	Install(ctx context.Context, spec proto.DriverSpec, baseURL string) error
-	// Load loads the driver and returns its version. ErrNeedReboot (wrapped)
-	// means a reboot will make it load.
-	Load(ctx context.Context) (string, error)
+	// Load makes the driver usable and returns its version. ErrNeedReboot
+	// (wrapped) means a reboot will make it load.
+	Load(ctx context.Context, spec proto.DriverSpec) (string, error)
 	Reboot() error
 	// RestartRuntime makes the model runtime look for GPUs again.
 	RestartRuntime(ctx context.Context) error
@@ -53,7 +55,7 @@ type drvState struct {
 }
 
 func driverKey(s *proto.DriverSpec) string {
-	return s.Name + "=" + s.Version + " " + strings.Join(s.Packages, " ")
+	return fmt.Sprintf("%s=%s %s igpu=%v", s.Name, s.Version, strings.Join(s.Packages, " "), s.UseIntegrated)
 }
 
 func (a *Agent) setDriver(obs *proto.ObservedDriver) {
@@ -131,7 +133,7 @@ func (a *Agent) installDriver(ctx context.Context, want proto.DriverSpec, key st
 			return err
 		}
 	}
-	version, err := ds.Load(ctx)
+	version, err := ds.Load(ctx, want)
 	if errors.Is(err, ErrNeedReboot) {
 		return a.rebootForDriver(want, key, allowReboot, err)
 	}

@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"aicluster/common/proto"
 )
@@ -74,9 +76,21 @@ func (d *AptDrivers) Install(ctx context.Context, spec proto.DriverSpec, baseURL
 	if err := os.WriteFile(filepath.Join(d.Dir, "sources.list"), []byte(src.String()), 0o644); err != nil {
 		return err
 	}
-	// Finish an install that a restart of the agent cut short.
-	if out, err := exec.CommandContext(ctx, "dpkg", "--configure", "-a").CombinedOutput(); err != nil {
-		return fmt.Errorf("dpkg --configure -a: %v: %s", err, lastLines(string(out), 4))
+	// Finish an install that a restart of the agent cut short. Ubuntu's own
+	// daily apt jobs may hold dpkg's lock for a while; wait for them.
+	for deadline := time.Now().Add(10 * time.Minute); ; {
+		out, err := exec.CommandContext(ctx, "dpkg", "--configure", "-a").CombinedOutput()
+		if err == nil {
+			break
+		}
+		if !strings.Contains(string(out), "lock") || time.Now().After(deadline) {
+			return fmt.Errorf("dpkg --configure -a: %v: %s", err, lastLines(string(out), 4))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
 	}
 	if err := d.apt(ctx, "update"); err != nil {
 		return err
@@ -108,7 +122,14 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines, " | ")
 }
 
-func (d *AptDrivers) Load(ctx context.Context) (string, error) {
+func (d *AptDrivers) Load(ctx context.Context, spec proto.DriverSpec) (string, error) {
+	if spec.Vendor == "intel" || spec.Vendor == "amd" {
+		return d.loadVulkan(ctx, spec)
+	}
+	return d.loadNvidia(ctx)
+}
+
+func (d *AptDrivers) loadNvidia(ctx context.Context) (string, error) {
 	kernel, err := os.ReadFile("/proc/sys/kernel/osrelease")
 	if err != nil {
 		return "", err
@@ -138,6 +159,86 @@ func (d *AptDrivers) Load(ctx context.Context) (string, error) {
 	}
 	version, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
 	return version, nil
+}
+
+// Kernel drivers that make Intel and AMD GPUs usable through Mesa's Vulkan.
+var vulkanKernelDrivers = map[string][]string{"intel": {"i915", "xe"}, "amd": {"amdgpu"}}
+
+// ollamaGPUConf lets Ollama, which runs as its own user, open the GPU's
+// render node, read its memory use (CAP_PERFMON, per Ollama's docs) and,
+// when allowed, use integrated GPUs, which it skips by default.
+const ollamaGPUConf = "/etc/systemd/system/ollama.service.d/aicluster-gpu.conf"
+
+func (d *AptDrivers) loadVulkan(ctx context.Context, spec proto.DriverSpec) (string, error) {
+	vendorID := map[string]string{"intel": "0x8086", "amd": "0x1002"}[spec.Vendor]
+	want := strings.Join(vulkanKernelDrivers[spec.Vendor], " or ")
+	devs, _ := filepath.Glob("/sys/bus/pci/devices/*")
+	usable, bound := false, ""
+	for _, dev := range devs {
+		if !strings.HasPrefix(readSys(dev+"/class"), "0x03") || readSys(dev+"/vendor") != vendorID {
+			continue
+		}
+		drv := ""
+		if link, err := os.Readlink(dev + "/driver"); err == nil {
+			drv = filepath.Base(link)
+		}
+		bound = drv
+		for _, k := range vulkanKernelDrivers[spec.Vendor] {
+			if r, _ := filepath.Glob(dev + "/drm/renderD*"); drv == k && len(r) > 0 {
+				usable = true
+			}
+		}
+	}
+	switch {
+	case usable:
+	case bound == "":
+		return "", fmt.Errorf("no kernel driver is loaded for the %s GPU (it needs %s)", spec.Vendor, want)
+	default:
+		return "", fmt.Errorf("the %s GPU runs the %q kernel driver; Mesa's Vulkan needs %s", spec.Vendor, bound, want)
+	}
+	icd := map[string]string{"intel": "intel", "amd": "radeon"}[spec.Vendor]
+	if m, _ := filepath.Glob("/usr/share/vulkan/icd.d/" + icd + "*_icd*.json"); len(m) == 0 {
+		return "", fmt.Errorf("Mesa's Vulkan driver for %s is not installed", spec.Vendor)
+	}
+
+	var conf strings.Builder
+	conf.WriteString("# Written by aicluster-agent: lets Ollama use this node's GPU.\n[Service]\n")
+	var groups []string
+	for _, g := range []string{"render", "video"} {
+		if _, err := user.LookupGroup(g); err == nil {
+			groups = append(groups, g)
+		}
+	}
+	if len(groups) > 0 {
+		fmt.Fprintf(&conf, "SupplementaryGroups=%s\n", strings.Join(groups, " "))
+	}
+	conf.WriteString("AmbientCapabilities=CAP_PERFMON\n")
+	igpu := "0"
+	if spec.UseIntegrated {
+		igpu = "1"
+	}
+	fmt.Fprintf(&conf, "Environment=OLLAMA_IGPU_ENABLE=%s\n", igpu)
+	if old, _ := os.ReadFile(ollamaGPUConf); string(old) != conf.String() {
+		if err := os.MkdirAll(filepath.Dir(ollamaGPUConf), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(ollamaGPUConf, []byte(conf.String()), 0o644); err != nil {
+			return "", err
+		}
+		if out, err := exec.CommandContext(ctx, "systemctl", "daemon-reload").CombinedOutput(); err != nil {
+			return "", fmt.Errorf("systemctl daemon-reload: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+	}
+	out, err := exec.CommandContext(ctx, "dpkg-query", "-W", "-f=${Version}", "mesa-vulkan-drivers").Output()
+	if err != nil {
+		return "", fmt.Errorf("dpkg-query mesa-vulkan-drivers: %v", err)
+	}
+	return "Mesa " + strings.TrimSpace(string(out)), nil
+}
+
+func readSys(p string) string {
+	b, _ := os.ReadFile(p)
+	return strings.TrimSpace(string(b))
 }
 
 func (d *AptDrivers) Reboot() error {

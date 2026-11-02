@@ -56,10 +56,13 @@ type GPUInfo struct {
 	VRAM     uint64     `json:"vram"`
 	Compute  GPUCompute `json:"compute"`
 	Driver   GPUDriver  `json:"driver"`
+	// Integrated GPUs are built into the CPU and use the node's RAM, so
+	// their memory doesn't count on top of it.
+	Integrated bool `json:"integrated,omitempty"`
 }
 
 type GPUCompute struct {
-	API        string `json:"api"` // cuda|rocm|level-zero|none
+	API        string `json:"api"` // cuda|vulkan|rocm; empty until a driver makes the card usable
 	Capability string `json:"capability"`
 }
 
@@ -69,7 +72,7 @@ type GPUDriver struct {
 }
 
 type AccelSummary struct {
-	Best      string `json:"best"` // cuda|rocm|level-zero|cpu
+	Best      string `json:"best"` // cuda|vulkan|rocm|cpu
 	TotalVRAM uint64 `json:"total_vram"`
 	GPUCount  int    `json:"gpu_count"`
 }

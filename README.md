@@ -32,7 +32,7 @@ OldAI turns a pile of forgotten desktops (the HP in the closet, the ex-gaming to
 - 🦾 **Many Slaves** do the heavy lifting: Ollama and llama.cpp, running whatever the Controller tells them.
 - 🔍 Slaves **find the Controller on their own**, get adopted, and from then on talk only over **mTLS**.
 - 🧩 Models too big for one box get **pooled** across several nodes over llama.cpp's RPC.
-- 🎮 **NVIDIA cards just work:** the Controller picks the right driver from Ubuntu's archive and the Slave installs it through the Controller, no internet needed.
+- 🎮 **GPUs just work:** NVIDIA cards get the right driver from Ubuntu's archive, and Intel and AMD graphics (yes, the ones built into laptops and mini PCs) get Mesa's Vulkan driver. The Slave installs it through the Controller, no internet needed.
 - 🔄 **One-button updates** roll the whole cluster forward, Controller first, then each Slave in turn, with automatic rollback.
 
 All of it runs on your LAN. Slaves never touch the internet. Your prompts never leave the building. 🏠
@@ -138,7 +138,7 @@ docs/         📖 the deep lore
 
 ## 🚧 Not yet
 
-- 🎮 NVIDIA drivers install themselves through the Controller, but haven't met a real card yet. AMD and Intel GPUs still run on the CPU.
+- 🎮 GPU drivers install themselves through the Controller, but haven't met a real card yet. Models split across several nodes still run on their CPUs.
 - 🧪 Tested on QEMU/KVM VMs and a real HP ProDesk. Your weird 2011 tower? Let us know how it goes.
 
 <div align="center">

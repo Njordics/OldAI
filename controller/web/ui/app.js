@@ -165,7 +165,7 @@ function driverRow(n, inv, obs) {
       rebooting: `Rebooting to load ${name}<div class="muted">${esc(d.error || "")}</div>`,
       reboot_required: `${name} is installed<div class="muted">It loads after a reboot. ${esc(d.error || "")}</div>`,
       ready: `${name} <span class="muted">${esc(d.version || "")}</span>`,
-      failed: `<span class="bad-text">${name} didn't install</span><div class="muted">${esc(d.error || "")} It is tried again in 30 minutes.</div>`,
+      failed: `<span class="bad-text">${name} isn't working</span><div class="muted">${esc(d.error || "")}</div>`,
     }[d.state] || `${name} <span class="muted">${esc(d.state)}</span>`;
   } else if (want) {
     html = `${name} <div class="muted">Picked for this node's card; waiting for the node.</div>`;
@@ -361,7 +361,7 @@ function renderDrawer() {
         ${cpu.flags?.length ? `<div class="flags">${cpu.flags.map(f => `<span class="pill plain">${esc(f)}</span>`).join("")}</div>` : ""}`],
       ["Memory", bytes(inv.memory?.total)],
       ["GPUs", inv.gpus?.length ? inv.gpus.map(g => `<div class="gpu"><strong>${esc(VENDOR[g.vendor] || g.vendor)}</strong> ${esc(g.model || g.pci_id)}
-          <div class="muted">${g.vram ? bytes(g.vram) + " VRAM · " : ""}${g.driver?.installed ? "driver " + esc(g.driver.version || "loaded") : "no driver yet"}</div></div>`).join("") : "None (CPU inference)"],
+          <div class="muted">${g.integrated ? "built into the processor, shares its memory · " : ""}${g.vram ? bytes(g.vram) + " VRAM · " : ""}${g.driver?.installed ? "driver " + esc(g.driver.version || "loaded") : "no driver yet"}</div></div>`).join("") : "None (CPU inference)"],
       driverRow(n, inv, obs),
       ["Disks", inv.disks?.length ? inv.disks.map(d => `<div class="disk"><span class="mono">${esc(d.mount)}</span> <span class="muted">${bytes(d.free)} free of ${bytes(d.total)}</span></div>`).join("") : "—"],
       ["Network", inv.network?.length ? inv.network.map(i => `<div class="nic"><span class="mono">${esc(i.iface)}</span> ${esc((i.addrs || []).join(", "))}
@@ -424,6 +424,7 @@ function renderSettings() {
   const c = state.cluster;
   if (!c) return;
   for (const r of document.querySelectorAll('input[name=mode]')) r.checked = r.value === c.adoption_mode;
+  $("#igpu-on").checked = !!c.integrated_gpus;
   $("#cluster-info").innerHTML = [
     ["Cluster ID", `<span class="mono">${esc(c.cluster_id)}</span>`],
     ["CA fingerprint", `<span class="mono">${esc(c.ca_fp)}</span>`],
@@ -436,6 +437,18 @@ function renderSettings() {
   const pill = $("#mode-pill");
   pill.textContent = c.adoption_mode === "auto" ? "Auto-adopt on" : "Approval required";
   pill.className = `pill ${c.adoption_mode === "auto" ? "s-adopted" : "s-pending"}`;
+}
+
+async function setIGPU(on) {
+  try {
+    await api("PUT", "/api/v1/settings", { integrated_gpus: on });
+    state.cluster.integrated_gpus = on;
+    toast(on ? "Nodes may now run models on integrated graphics" : "Nodes now leave integrated graphics alone");
+  } catch (e) {
+    if (e instanceof AuthError) return showLogin();
+    toast(e.message, true);
+  }
+  renderSettings();
 }
 
 async function setMode(mode) {
@@ -683,6 +696,7 @@ function wire() {
   for (const r of document.querySelectorAll("input[name=mode]")) {
     r.addEventListener("change", () => setMode(r.value));
   }
+  $("#igpu-on").addEventListener("change", e => setIGPU(e.target.checked));
 
   window.addEventListener("hashchange", route);
   document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("#app").hidden) refresh(); });

@@ -18,7 +18,9 @@ import (
 // GPU drivers (protocol §14). The Controller keeps a copy of Ubuntu's archive
 // for the Slaves, which have no internet, and picks a driver for each node's
 // NVIDIA cards from the archive's own list of which driver supports which
-// card. The node installs it with apt through the Controller.
+// card. Intel and AMD GPUs already have their kernel driver; they get Mesa's
+// Vulkan driver, which Ollama uses. The node installs it with apt through the
+// Controller.
 
 const (
 	aptPath = "/apt/ubuntu" // where the node API serves the archive
@@ -28,6 +30,40 @@ const (
 )
 
 var aptComponents = []string{"main", "restricted"}
+
+const (
+	mesaVulkan = "mesa-vulkan-drivers"
+	// settingIGPU turns the use of integrated GPUs on (default) or off.
+	settingIGPU = "integrated_gpus"
+)
+
+// UseIntegratedGPUs reports whether nodes may run models on GPUs built into
+// their CPU. On older chips that can be slower than the CPU itself.
+func (c *Core) UseIntegratedGPUs(ctx context.Context) bool {
+	v, _ := c.Store.Setting(ctx, settingIGPU, "on")
+	return v != "off"
+}
+
+// SetUseIntegratedGPUs changes the setting and tells the affected nodes.
+func (c *Core) SetUseIntegratedGPUs(ctx context.Context, on bool) error {
+	v := "off"
+	if on {
+		v = "on"
+	}
+	if err := c.Store.SetSetting(ctx, settingIGPU, v); err != nil {
+		return err
+	}
+	nodes, err := c.Store.ListNodes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range nodes {
+		if servesModels(n) {
+			c.SyncDesired(ctx, n.NodeID)
+		}
+	}
+	return nil
+}
 
 type driverState struct {
 	mu      sync.Mutex
@@ -78,7 +114,11 @@ func (c *Core) driverFor(n *store.Node) (spec *proto.DriverSpec, known bool) {
 	}
 	gpus, kernel, suite := nodeGPUs(n)
 	var aliases []string
+	vulkan := ""
 	for _, g := range gpus {
+		if (g.Vendor == "intel" || g.Vendor == "amd") && vulkan == "" {
+			vulkan = g.Vendor
+		}
 		if g.Vendor == "nvidia" {
 			if g.Modalias == "" {
 				c.setDriverWhy(n.NodeID, "the node's agent is too old to report its NVIDIA card; update it")
@@ -89,7 +129,15 @@ func (c *Core) driverFor(n *store.Node) (spec *proto.DriverSpec, known bool) {
 	}
 	if len(aliases) == 0 {
 		c.setDriverWhy(n.NodeID, "")
-		return nil, true
+		if vulkan == "" {
+			return nil, true
+		}
+		// Mesa is in Ubuntu's main component, so there is nothing to look up.
+		return &proto.DriverSpec{
+			Vendor: vulkan, Name: mesaVulkan, Packages: []string{mesaVulkan, "libvulkan1"},
+			Mirror: aptPath, Suites: []string{suite, suite + "-updates", suite + "-security"}, Components: aptComponents,
+			UseIntegrated: c.UseIntegratedGPUs(context.Background()),
+		}, true
 	}
 	ix := c.driverIndex(suite)
 	if ix == nil {

@@ -129,6 +129,8 @@ type ClusterInfo struct {
 	AdoptionMode string        `json:"adoption_mode"`
 	GatewayURLs  []string      `json:"gateway_urls"`
 	SlaveNet     *SlaveNetInfo `json:"slave_net,omitempty"`
+	// IntegratedGPUs: nodes may run models on GPUs built into their CPU.
+	IntegratedGPUs bool `json:"integrated_gpus"`
 }
 
 // SlaveNetInfo describes the Controller's own subnet for Slaves (§12).
@@ -147,6 +149,8 @@ func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {
 		Endpoints:    s.core.Endpoints(),
 		AdoptionMode: s.core.Mode(),
 		GatewayURLs:  s.gatewayURLs(),
+
+		IntegratedGPUs: s.core.UseIntegratedGPUs(r.Context()),
 	}
 	if n := s.core.SlaveNet(); n != nil {
 		info.SlaveNet = &SlaveNetInfo{Subnet: n.Subnet.String(), ControllerIP: n.ControllerIP.String(), Iface: n.Iface, Domain: n.Domain}
@@ -235,12 +239,16 @@ type Settings struct {
 	UpdateCheck  *bool  `json:"update_check,omitempty"`
 	UpdateRepo   string `json:"update_repo,omitempty"`
 	UpdateBranch string `json:"update_branch,omitempty"`
+	// IntegratedGPUs turns the use of integrated GPUs on or off (§14).
+	IntegratedGPUs *bool `json:"integrated_gpus,omitempty"`
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	u := UpdateSettings(s.core.Store)(r.Context())
+	igpu := s.core.UseIntegratedGPUs(r.Context())
 	httpx.WriteJSON(w, http.StatusOK, Settings{
 		AdoptionMode: s.core.Mode(), UpdateCheck: &u.Enabled, UpdateRepo: u.Repo, UpdateBranch: u.Branch,
+		IntegratedGPUs: &igpu,
 	})
 }
 
@@ -253,6 +261,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if req.AdoptionMode != "" {
 		if err := s.core.SetMode(r.Context(), req.AdoptionMode); err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, proto.ErrBadRequest, err.Error())
+			return
+		}
+	}
+	if req.IntegratedGPUs != nil {
+		if err := s.core.SetUseIntegratedGPUs(r.Context(), *req.IntegratedGPUs); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, proto.ErrInternal, err.Error())
 			return
 		}
 	}
