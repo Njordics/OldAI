@@ -12,8 +12,22 @@ def variants():
     return cat.load([CATALOG]).variants()
 
 
-def nodes(*specs):
-    return [node(node_id=f"n{i}", **s) for i, s in enumerate(specs)]
+def nodes(*specs, pool_gpu=True):
+    """Nodes whose llama.cpp can use their GPUs, unless pool_gpu=False."""
+    return [node(node_id=f"n{i}", pool_gpu=pool_gpu, **s) for i, s in enumerate(specs)]
+
+
+def test_gpu_memory_ignored_when_pooled_llamacpp_is_cpu_only(variants):
+    # Big cards, little RAM: the CPU-only llama.cpp would hold its share in
+    # RAM, so the cards' memory must not count.
+    ns = nodes(*[dict(gpus=[{"vram": 24 * GiB}], ram_total=16 * GiB)] * 3, pool_gpu=False)
+    r = pool_variant(variants["llama3.1:70b"], ns)
+    assert not r["fits"]
+    ns = nodes(*[dict(gpus=[{"vram": 24 * GiB}], ram_total=64 * GiB)] * 2, pool_gpu=False)
+    r = pool_variant(variants["llama3.1:70b"], ns)
+    assert r["fits"]
+    for m in r["members"]:
+        assert m["placement"] == "cpu" and m["vram"] == 0 and m["ram"] > 0
 
 
 def test_gpu_pool_for_model_too_big_for_any_card(variants):

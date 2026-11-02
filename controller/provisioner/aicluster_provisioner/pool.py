@@ -4,6 +4,11 @@ llama.cpp's RPC mode lets a leader node offload blocks of layers to worker
 nodes. This module decides which nodes form the pool and what share of the
 layers each holds. Memory comes from GPUs first (fast), then system RAM.
 Every member pays a fixed runtime overhead, so fewer members is better.
+
+A node's GPU memory counts only when its llama.cpp can use the GPU
+(`pool_gpu` in the node's fit data). The Slave image ships llama.cpp's CPU
+build, so today pooled shares always come from RAM, even on nodes whose
+GPU serves single-node models through Ollama.
 """
 
 from __future__ import annotations
@@ -73,12 +78,19 @@ def _choose(need: int, budgets: list[tuple[str, Budget]], max_nodes: int, gpu_on
     return None
 
 
+def _pool_budget(node: dict, exclude: set[str]) -> Budget:
+    b = Budget.for_node(node, exclude)
+    if not node.get("pool_gpu"):
+        b = Budget(vram=0, ram=b.ram, disk=b.disk)
+    return b
+
+
 def pool_variant(v: Variant, nodes: list[dict], quant: str | None = None, max_nodes: int = DEFAULT_MAX_NODES,
                  exclude: set[str] | None = None, explicit: bool = False) -> dict:
     """Best pool for v. With explicit=True the pool uses exactly `nodes`
     (members that end up holding nothing are dropped)."""
     exclude = exclude or set()
-    budgets = [(n["node_id"], Budget.for_node(n, exclude)) for n in nodes]
+    budgets = [(n["node_id"], _pool_budget(n, exclude)) for n in nodes]
     disk = {nid: b.disk for nid, b in budgets}
     candidates = []
     for rank, q in enumerate(v.quants):
@@ -105,7 +117,9 @@ def pool_variant(v: Variant, nodes: list[dict], quant: str | None = None, max_no
         for nid, (vram, ram) in by_share:
             used = vram + ram
             members.append({
-                "node_id": nid, "share": round(used / need, 4), "vram": vram + MEMBER_OVERHEAD, "ram": ram,
+                # The runtime's overhead sits where the member's share does.
+                "node_id": nid, "share": round(used / need, 4),
+                "vram": vram + (MEMBER_OVERHEAD if vram else 0), "ram": ram + (0 if vram else MEMBER_OVERHEAD),
                 "placement": "gpu" if ram == 0 else ("cpu" if vram == 0 else "hybrid"), "leader": nid == leader,
             })
         candidates.append((0 if gpu else 1, rank, len(members), q, need, members))
