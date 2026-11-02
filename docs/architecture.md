@@ -155,7 +155,7 @@ sequenceDiagram
 
 ### 6.2 Provisioning (reconcile loop on the Slave)
 
-1. **Drivers** — from inventory: NVIDIA → `nvidia-driver-<branch>-server` + CUDA runtime libs; AMD → ROCm; Intel → `intel-opencl-icd`/oneAPI level-zero; none → CPU. Packages come through the Controller apt proxy. If a driver install needs a reboot, the agent reports `reboot_required` and reboots only when the desired state has `allow_reboot: true` (the Controller sets this for nodes not currently serving).
+1. **Drivers** — the Controller picks NVIDIA cards' driver from Ubuntu's archive by matching each card's modalias against the driver packages' own lists: headless, no DKMS, with Canonical's signed prebuilt kernel modules. The node installs it with apt through the Controller's copy of the archive, and reboots once if the module needs a newer kernel. AMD (ROCm) and Intel are not handled yet; those nodes run on the CPU. Details: [protocol.md §14](protocol.md#14-gpu-drivers).
 2. **Runtime** — install/upgrade the requested runtime packages from the Controller's aicluster repo (Ollama and llama.cpp binaries are repackaged as `.deb` on the Controller side; vLLM ships as a pinned wheelhouse).
 3. **Models** — for each assigned model: fetch via shim (Ollama) or nodeapi `/blobs/` (GGUF/HF), verify sha256, load/warm, report progress per layer. Unassigned models are unloaded, and deleted after `gc_grace` (default 24 h) so a flapping plan does not cause re-downloads.
 4. Report `observed_generation` = desired generation once all steps succeed.

@@ -215,8 +215,12 @@ All mutating ops return a `job_id`. Jobs survive agent restarts (persisted in `/
   "v": 1,
   "generation": 7,
   "node_name": "gpu-box-1",
-  "allow_reboot": false,
-  "drivers": { "target": "auto" },                  // "auto" | "nvidia-550" | "rocm-6.2" | "intel" | "cpu"
+  "allow_reboot": true,                             // set while a driver may need a reboot (§14)
+  "drivers": { "vendor": "nvidia", "name": "nvidia-driver-580-server-open", "version": "580.178.04-0ubuntu0.24.04.1",
+               "packages": ["nvidia-headless-no-dkms-580-server-open", "nvidia-utils-580-server",
+                            "linux-modules-nvidia-580-server-open-generic"],
+               "mirror": "/apt/ubuntu", "suites": ["noble", "noble-updates", "noble-security"],
+               "components": ["main", "restricted"] },
   "agent":   { "version": "1.0.4" },
   "os":      { "apply_updates": false, "package_set_version": "2026.10.2" },
   "runtimes": [
@@ -257,9 +261,13 @@ Reconcile order: agent → drivers → os → runtimes → models. A failed step
       "state": "loaded",           // "pending" | "downloading" | "verifying" | "installed" | "loading" | "loaded" | "failed"
       "progress": 1.0, "bytes_done": 5444000000, "bytes_total": 5444000000,
       "vram_used": 6100000000, "error": null }
-  ]
+  ],
+  "driver": { "name": "nvidia-driver-580-server-open", "state": "ready", "version": "580.178.04" },
+  "gpus": [ /* the current GPU list, as in §6.1 */ ]
 }
 ```
+
+`driver.state` is `installing`, `rebooting`, `reboot_required`, `ready` or `failed` (§14).
 
 ### 5.3 Heartbeat (Slave → Controller)
 
@@ -331,7 +339,7 @@ Controller generates new CA, cross-signs it with the old one, then for each node
 {
   "v": 1,
   "collected_at": "…",
-  "host": { "hostname": "gpu-box-1", "os": "Ubuntu 24.04.1 LTS", "kernel": "6.8.0-48-generic",
+  "host": { "hostname": "gpu-box-1", "os": "Ubuntu 24.04.1 LTS", "codename": "noble", "kernel": "6.8.0-48-generic",
             "product": "ASUS PRIME X670", "product_uuid": "…" },
   "cpu": { "model": "AMD Ryzen 9 7950X", "vendor": "amd", "sockets": 1, "cores": 16, "threads": 32,
            "flags": ["avx2", "avx512f", "avx512_vnni"] },
@@ -339,6 +347,7 @@ Controller generates new CA, cross-signs it with the old one, then for each node
   "disks": [ { "mount": "/var/lib/aicluster", "total": 2000000000000, "free": 1800000000000, "rotational": false } ],
   "gpus": [
     { "index": 0, "vendor": "nvidia", "model": "NVIDIA GeForce RTX 4090", "pci_id": "10de:2684",
+      "bus_id": "0000:01:00.0", "modalias": "pci:v000010DEd00002684sv00001043sd000088E2bc03sc00i00",
       "vram": 25769803776, "compute": { "api": "cuda", "capability": "8.9" },
       "driver": { "installed": true, "version": "550.120" } }
   ],
@@ -354,9 +363,9 @@ Controller generates new CA, cross-signs it with the old one, then for each node
 | CPU | `/proc/cpuinfo`, `lscpu -J` |
 | RAM | `/proc/meminfo` |
 | Disk | `statfs` on model dir |
-| GPU (pre-driver) | PCI scan of `/sys/bus/pci/devices/*` class `0x03xx`, vendor `10de`/`1002`/`8086`; model names from the bundled `pci.ids`; VRAM estimated from a bundled table until the driver is present |
-| GPU (post-driver) | NVIDIA: NVML via `nvidia-smi --query-gpu … --format=csv`; AMD: `amd-smi`/`rocm-smi --json`; Intel: `xpu-smi` / sysfs `lmem` |
-| CUDA capability | NVML `cuda_compute_capability`; ROCm `gfx` target from `rocminfo` |
+| GPU (pre-driver) | PCI scan of `/sys/bus/pci/devices/*` class `0x03xx`, vendor `10de`/`1002`/`8086`: PCI ID, bus address and `modalias`. No model name or memory until a driver is loaded. |
+| GPU (post-driver) | NVIDIA: `nvidia-smi --query-gpu=pci.bus_id,name,memory.total,driver_version,compute_cap`. AMD and Intel: not yet. |
+| CUDA capability | `nvidia-smi`'s `compute_cap` |
 | Network speed | `/sys/class/net/*/speed`, physical interfaces only |
 
 ---
@@ -405,7 +414,7 @@ Quant preference order (best first): `bf16/fp16 > q8_0 > q6_K > q5_K_M > awq/gpt
 | `GET /v2/…` | OCI distribution API (read-only) — pull-through cache of `registry.ollama.ai`, used by the Slave's loopback shim |
 | `GET /v1/update/bundle` | the update bundle being rolled out (§13); any adopted node |
 | `GET /blobs/{path}` | GGUF / safetensors / wheel files from the model cache; supports `Range`; response header `X-Content-SHA256` |
-| `GET /apt/{…}` | apt proxy (Ubuntu archive, NVIDIA CUDA repo, ROCm repo) |
+| `GET /apt/ubuntu/{…}` | the Controller's copy of Ubuntu's archive, for GPU drivers (§14); any adopted node |
 | `GET /repo/{…}` | signed aicluster apt repo (agent, runtimes, whisper) |
 
 Cache semantics: on a miss, the Controller fetches upstream once (concurrent requests for the same blob are coalesced) while streaming to the requester. In offline mode, a miss returns `404 not_cached`.
@@ -570,3 +579,32 @@ The dashboard's **Update Controller and Slaves now** button installs the branch'
 6. **Stop on failure:** a node that reports `failed`, or isn't back within 10 minutes, fails the rollout. The remaining nodes are left untouched, since a bad build would most likely break them all. Pressing Update again retries the nodes that aren't current.
 
 **Trust.** The updater runs whatever the bundle contains as root, so anyone who can push to the configured branch can update every cluster that follows it. The SHA-256 check guards against corrupted or swapped downloads, not against a compromised repository. Point Settings → Updates at a repository and branch you control.
+
+## 14. GPU drivers
+
+Slaves have no internet, so the Controller picks each node's GPU driver and serves Ubuntu's archive to it. Only NVIDIA cards are handled so far.
+
+**Identify.** The agent reports each card's PCI `modalias` (§6.1) in its inventory, and its current GPU list in `observed.gpus`. The Controller replaces the stored inventory's GPUs with that list, so a card shows its model and memory once its driver loads, and the provisioner can place models on it.
+
+**Pick** (Controller, `controller/drivers`):
+1. It reads `restricted/binary-amd64/Packages.gz` for the node's release (`host.codename`, default `noble`) and its `-updates` and `-security` pockets, keeping the newest version of each package. It reads them through its archive copy, and again every 12 hours.
+2. Ubuntu's `nvidia-driver-<branch>[-server][-open]` packages list the cards they support as modalias patterns, the same data `ubuntu-drivers` uses. Every NVIDIA card on the node must match.
+3. Like `ubuntu-drivers --gpgpu`, it prefers the `-server` (long-term support) line, then the newest branch, then NVIDIA's open kernel modules. The open modules only list the cards that support them (Turing and newer).
+4. The packages are the headless driver without DKMS, `nvidia-utils` for `nvidia-smi`, and Canonical's prebuilt, signed kernel modules for the node's kernel line: `linux-modules-nvidia-<suffix>-generic` for Ubuntu's main kernel, `-generic-hwe-24.04` or `-generic-<x.y>` for the others, chosen by which kernel series each one depends on. Signed modules load with Secure Boot on, and nothing is compiled on the node.
+5. It puts the result in `desired.drivers` and sets `allow_reboot`. When no driver supports a card, `drivers` is left out and the dashboard shows why.
+
+**Install** (agent, as root):
+1. It writes its own source list pointing at `http://127.0.0.1:7452/apt/ubuntu` (the loopback shim, which forwards to the Controller over mTLS), `signed-by` Ubuntu's archive keyring. Its package lists live in `/var/lib/aicluster/apt`, so the node's normal apt sources are neither used nor changed.
+2. It runs `apt-get update` and `apt-get install --no-install-recommends` with the packages. apt checks the archive's signature and every file's hash, so the Controller can't alter what gets installed.
+3. If the running kernel has no module for the driver, or `nouveau` holds the card, it reports `rebooting` and reboots (blocking `nouveau` first if needed). The module packages pin the newest kernel of their line, so a node installed from an older ISO reboots into that kernel. It reboots once per driver; if the module still won't load after that, it reports `failed`. Without `allow_reboot` it reports `reboot_required` and waits.
+4. It loads `nvidia` and `nvidia_uvm`, checks `nvidia-smi`, rescans the GPUs, restarts Ollama so it finds them, and reports `ready` with the driver version.
+5. A failed install is tried again after 30 minutes. When the packages are already installed it only loads the driver. Upgrading an installed driver isn't done yet.
+
+**Archive copy** (`GET /apt/ubuntu/…` on the node API):
+- It fetches from `--apt-mirror` (default `http://archive.ubuntu.com/ubuntu`) into `<data dir>/apt`. An empty `--apt-mirror` turns GPU drivers off.
+- Only paths under `dists/` and `pool/` are served.
+- Packages and `by-hash` files never change, so they are kept. Other index files are fetched again after 30 minutes, and the old copy is served if the archive can't be reached.
+- Concurrent requests for one file share a single download, and a second node with the same card gets everything from the Controller's copy.
+- Offline mode serves only what is already cached.
+
+**Tested:** a Slave VM without internet, reporting an RTX 4090's modalias (a VM can't have the real card), got `nvidia-driver-580-server-open`. It installed it and kernel 6.8.0-147 through the Controller, rebooted once from 6.8.0-139, and then failed at `modprobe nvidia: No such device`, as it should without the card. Not tested: a real NVIDIA card.

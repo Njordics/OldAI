@@ -1,6 +1,6 @@
 // Package inventory collects the Slave's hardware report and live health.
-// Build step 2 covers host, CPU, memory, disk, network and a PCI-level GPU
-// scan; driver-level GPU detail (NVML, ROCm, VRAM) arrives in step 3.
+// GPUs are found on the PCI bus; NVIDIA cards get their model, memory and
+// compute capability from nvidia-smi once a driver is loaded.
 package inventory
 
 import (
@@ -47,37 +47,47 @@ func Collect(modelDir string) *proto.Inventory {
 	if total, free, ok := diskUsage(modelDir); ok {
 		inv.Disks = []proto.DiskInfo{{Mount: modelDir, Total: total, Free: free}}
 	}
+	nvidiaDetails(inv.GPUs)
+	Summarize(inv)
+	return inv
+}
+
+// Summarize recomputes the accelerator summary from inv.GPUs.
+func Summarize(inv *proto.Inventory) {
 	inv.Accel = proto.AccelSummary{Best: "cpu", GPUCount: len(inv.GPUs)}
 	for _, g := range inv.GPUs {
 		inv.Accel.TotalVRAM += g.VRAM
+		if g.Compute.API != "" && g.Compute.API != "none" && inv.Accel.Best == "cpu" {
+			inv.Accel.Best = g.Compute.API
+		}
 	}
-	return inv
 }
 
 func host() proto.HostInfo {
 	h, _ := os.Hostname()
 	return proto.HostInfo{
 		Hostname:    h,
-		OS:          osRelease(),
+		OS:          osRelease("PRETTY_NAME", runtime.GOOS),
+		Codename:    osRelease("VERSION_CODENAME", ""),
 		Kernel:      readTrim("proc/sys/kernel/osrelease"),
 		Product:     strings.TrimSpace(readTrim("sys/class/dmi/id/sys_vendor") + " " + readTrim("sys/class/dmi/id/product_name")),
 		ProductUUID: readTrim("sys/class/dmi/id/product_uuid"),
 	}
 }
 
-func osRelease() string {
+func osRelease(key, def string) string {
 	f, err := os.Open(path("etc/os-release"))
 	if err != nil {
-		return runtime.GOOS
+		return def
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		if v, ok := strings.CutPrefix(sc.Text(), "PRETTY_NAME="); ok {
+		if v, ok := strings.CutPrefix(sc.Text(), key+"="); ok {
 			return strings.Trim(v, `"`)
 		}
 	}
-	return runtime.GOOS
+	return def
 }
 
 func cpu() proto.CPUInfo {
@@ -157,8 +167,11 @@ func meminfo(key string) uint64 {
 
 var gpuVendors = map[string]string{"0x10de": "nvidia", "0x1002": "amd", "0x8086": "intel"}
 
-// pciGPUs finds display-class PCI devices from known vendors. Model names
-// and VRAM come from driver tools in step 3.
+// computeDrivers are the kernel drivers that make a card usable for models;
+// nouveau, for one, is not.
+var computeDrivers = map[string]bool{"nvidia": true, "amdgpu": true, "i915": true, "xe": true}
+
+// pciGPUs finds display-class PCI devices from known vendors.
 func pciGPUs() []proto.GPUInfo {
 	devs, _ := filepath.Glob(path("sys/bus/pci/devices/*"))
 	sort.Strings(devs)
@@ -175,10 +188,12 @@ func pciGPUs() []proto.GPUInfo {
 		dev := strings.TrimPrefix(readFile(filepath.Join(d, "device")), "0x")
 		vid := strings.TrimPrefix(readFile(filepath.Join(d, "vendor")), "0x")
 		out = append(out, proto.GPUInfo{
-			Index:  len(out),
-			Vendor: vendor,
-			PCIID:  vid + ":" + dev,
-			Driver: proto.GPUDriver{Installed: readLink(filepath.Join(d, "driver")) != ""},
+			Index:    len(out),
+			Vendor:   vendor,
+			PCIID:    vid + ":" + dev,
+			BusID:    filepath.Base(d),
+			Modalias: readFile(filepath.Join(d, "modalias")),
+			Driver:   proto.GPUDriver{Installed: computeDrivers[readLink(filepath.Join(d, "driver"))]},
 		})
 	}
 	return out

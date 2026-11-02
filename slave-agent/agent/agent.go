@@ -75,6 +75,11 @@ type Config struct {
 	// VCS stamp). Installer installs updates; nil means this node can't.
 	BuildCommit string
 	Installer   selfupdate.Installer
+	// Drivers installs the GPU drivers the Controller picks; nil means
+	// this node can't.
+	Drivers DriverSystem
+	// ScanGPUs replaces the PCI scan (tests).
+	ScanGPUs func() []proto.GPUInfo
 }
 
 func (c *Config) defaults() {
@@ -159,6 +164,7 @@ type Agent struct {
 	netC   chan struct{}
 
 	upd updState
+	drv drvState
 }
 
 func New(cfg Config, log *slog.Logger) (*Agent, error) {
@@ -210,6 +216,10 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 
 func (a *Agent) refreshInventory() {
 	inv := inventory.Collect(a.cfg.ModelDir)
+	if a.cfg.ScanGPUs != nil {
+		inv.GPUs = a.cfg.ScanGPUs()
+		inventory.Summarize(inv)
+	}
 	fp := a.cfg.HWFingerprint
 	if fp == "" {
 		fp = inventory.HWFingerprint(inv)
@@ -295,7 +305,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	tlsLn := tls.NewListener(a.ln, a.serverTLS())
 
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator, a.serveShim, a.modelLoop, a.netLoop, a.updateLoop} {
+	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator, a.serveShim, a.modelLoop, a.netLoop, a.updateLoop, a.driverLoop} {
 		wg.Add(1)
 		go func() { defer wg.Done(); loop(ctx) }()
 	}

@@ -62,6 +62,7 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
 .muted { color: var(--muted); }
 .hint { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
 .error { color: var(--bad); background: var(--bad-soft); padding: 8px 10px; border-radius: 8px; margin: 10px 0 0; }
+.bad-text { color: var(--bad); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 /* Brand */

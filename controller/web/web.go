@@ -180,7 +180,14 @@ func (s *Server) getNode(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, proto.ErrInternal, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, n)
+	httpx.WriteJSON(w, http.StatusOK, NodeDetail{Node: n, DriverProblem: s.core.DriverProblem(n.NodeID)})
+}
+
+// NodeDetail is one node with what the dashboard explains about it.
+type NodeDetail struct {
+	*store.Node
+	// DriverProblem says why a node with an NVIDIA card gets no driver.
+	DriverProblem string `json:"driver_problem,omitempty"`
 }
 
 type AdoptRequest struct {

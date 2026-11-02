@@ -137,7 +137,11 @@ QEMU/KVM inside WSL2 on an isolated bridge with DHCP, 6 GB RAM and 4 vCPUs per V
 
 Not tested: physical hardware, booting from USB, GPUs, spinning disks (the non-discard wipe path), a home network that already uses `10.10.10.0/24`.
 
+## GPU drivers
+
+No GPU drivers are in the image. When a Slave has an NVIDIA card, the Controller picks the driver from Ubuntu's archive and the Slave installs it through the Controller, then reboots once if the driver needs a newer kernel. The Controller needs internet the first time; later Slaves with the same card get it from the Controller's copy. Node details in the dashboard show the driver's progress. Details: [protocol.md §14](protocol.md#14-gpu-drivers).
+
 ## Not covered yet
 
-- **GPU drivers:** NVIDIA and AMD drivers are not in the image. Ollama's bundled CUDA libraries need the NVIDIA kernel driver. Until drivers come through the Controller, Slaves run models on the CPU.
+- **AMD and Intel GPUs:** no drivers yet, so those Slaves run models on the CPU. NVIDIA cards get their driver through the Controller (below).
 - **Raw USB image:** writing the ISO to a stick with `dd` or a USB imager works, because Ubuntu's ISO is hybrid. A separate raw image is not built.

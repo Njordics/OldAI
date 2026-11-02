@@ -153,6 +153,32 @@ function duration(sec) {
 
 const VENDOR = { nvidia: "NVIDIA", amd: "AMD", intel: "Intel" };
 
+// driverRow explains the GPU driver the Controller picked and how far the
+// node is with it (protocol §14), or null when there's nothing to say.
+function driverRow(n, inv, obs) {
+  const d = obs?.driver, want = n.desired?.drivers;
+  const name = esc(d?.name || want?.name || "");
+  let html;
+  if (d) {
+    html = {
+      installing: `Installing ${name}…<div class="muted">Downloaded through the Controller from Ubuntu's archive.</div>`,
+      rebooting: `Rebooting to load ${name}<div class="muted">${esc(d.error || "")}</div>`,
+      reboot_required: `${name} is installed<div class="muted">It loads after a reboot. ${esc(d.error || "")}</div>`,
+      ready: `${name} <span class="muted">${esc(d.version || "")}</span>`,
+      failed: `<span class="bad-text">${name} didn't install</span><div class="muted">${esc(d.error || "")} It is tried again in 30 minutes.</div>`,
+    }[d.state] || `${name} <span class="muted">${esc(d.state)}</span>`;
+  } else if (want) {
+    html = `${name} <div class="muted">Picked for this node's card; waiting for the node.</div>`;
+  } else if (n.driver_problem) {
+    html = `None <div class="muted">${esc(n.driver_problem)}</div>`;
+  } else if (inv?.gpus?.some(g => g.vendor === "nvidia")) {
+    html = `None yet <div class="muted">The Controller is choosing one.</div>`;
+  } else {
+    return null;
+  }
+  return ["GPU driver", html];
+}
+
 // networkLabel says which network a node is on (Slave network or home LAN).
 function networkLabel(o) {
   const where = o.on_slave_net ? "Slave network" : "Home network";
@@ -336,6 +362,7 @@ function renderDrawer() {
       ["Memory", bytes(inv.memory?.total)],
       ["GPUs", inv.gpus?.length ? inv.gpus.map(g => `<div class="gpu"><strong>${esc(VENDOR[g.vendor] || g.vendor)}</strong> ${esc(g.model || g.pci_id)}
           <div class="muted">${g.vram ? bytes(g.vram) + " VRAM · " : ""}${g.driver?.installed ? "driver " + esc(g.driver.version || "loaded") : "no driver yet"}</div></div>`).join("") : "None (CPU inference)"],
+      driverRow(n, inv, obs),
       ["Disks", inv.disks?.length ? inv.disks.map(d => `<div class="disk"><span class="mono">${esc(d.mount)}</span> <span class="muted">${bytes(d.free)} free of ${bytes(d.total)}</span></div>`).join("") : "—"],
       ["Network", inv.network?.length ? inv.network.map(i => `<div class="nic"><span class="mono">${esc(i.iface)}</span> ${esc((i.addrs || []).join(", "))}
           <div class="muted">${i.speed_mbps > 0 ? i.speed_mbps + " Mb/s · " : ""}${esc(i.mac)}</div></div>`).join("") : "—"],

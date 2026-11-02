@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -49,6 +50,7 @@ func main() {
 	fs.IntVar(&cfg.InferenceSlots, "inference-slots", 4, "requests the runtime serves at once (match OLLAMA_NUM_PARALLEL)")
 	fs.StringVar(&cfg.LlamaCppDir, "llamacpp-dir", "/usr/lib/aicluster/llama.cpp", "directory with llama.cpp's ggml-rpc-server and llama-server (pooled models)")
 	fs.BoolVar(&cfg.ManageNetwork, "manage-network", true, "move this node onto the Controller's Slave network when asked (Linux, systemd-networkd)")
+	drivers := fs.Bool("gpu-drivers", true, "install the GPU drivers the Controller picks (Ubuntu, root)")
 	updateDir := fs.String("update-dir", selfupdate.DefaultDir, "where update bundles are staged for the root updater (empty: this node can't update itself)")
 	var fakeMBps int64
 	fs.Int64Var(&fakeMBps, "fake-mbps", 0, "throttle the fake runtime's pulls (MB/s, 0 = unlimited)")
@@ -60,6 +62,13 @@ func main() {
 	if *updateDir != "" && runtime.GOOS == "linux" {
 		cfg.Installer = selfupdate.FileInstaller{Path: *updateDir}
 	}
+	if *drivers && runtime.GOOS == "linux" {
+		unit := ""
+		if cfg.Runtime == "ollama" {
+			unit = "ollama.service"
+		}
+		cfg.Drivers = &agent.AptDrivers{Dir: filepath.Join(cfg.DataDir, "apt"), Runtime: unit}
+	}
 	if err := os.MkdirAll(cfg.ModelDir, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -68,6 +77,9 @@ func main() {
 	var lvl slog.Level
 	_ = lvl.UnmarshalText([]byte(logLevel))
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}))
+	if d, ok := cfg.Drivers.(*agent.AptDrivers); ok {
+		d.Log = log.With("component", "drivers")
+	}
 
 	switch cmd {
 	case "run":

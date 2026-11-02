@@ -147,6 +147,8 @@ func (a *Agent) observed() *proto.ObservedState {
 		Models:             models,
 		Network:            a.observedNetworkLocked(),
 		Update:             update,
+		Driver:             a.observedDriver(),
+		GPUs:               a.inv.GPUs,
 	}
 }
 

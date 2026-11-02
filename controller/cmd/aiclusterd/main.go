@@ -48,6 +48,7 @@ func main() {
 	flag.DurationVar(&cfg.ModelGCGrace, "model-gc-grace", 24*time.Hour, "how long Slaves keep unassigned models on disk")
 	flag.StringVar(&cfg.SlaveNet, "slave-net", "off", "move adopted Slaves to the Controller's own subnet: off | auto | CIDR (Linux; needs CAP_NET_ADMIN, CAP_NET_BIND_SERVICE, CAP_NET_RAW)")
 	flag.StringVar(&cfg.SlaveIface, "slave-iface", "", "interface for the Slave network (default: the default-route interface)")
+	flag.StringVar(&cfg.AptMirror, "apt-mirror", "http://archive.ubuntu.com/ubuntu", "Ubuntu archive copied for the Slaves' GPU drivers (empty: no GPU driver installs)")
 	updateAPI := flag.String("update-api", updates.DefaultAPI, "GitHub API used for update checks")
 	updateEvery := flag.Duration("update-interval", updates.DefaultInterval, "how often to check GitHub for updates")
 	assumeCommit := flag.String("assume-build-commit", "", "testing: pretend this Controller was built from this commit")

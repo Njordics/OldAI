@@ -41,6 +41,8 @@ func (c *Core) serveNodeAPI(ctx context.Context) error {
 	mux.Handle("GET /v2/", c.anyNode(c.Models))
 	// The update bundle being rolled out (§13).
 	mux.Handle("GET "+bundlePath, c.anyNode(http.HandlerFunc(c.serveBundle)))
+	// Ubuntu's archive, for GPU drivers (§14).
+	mux.Handle("GET "+aptPath+"/", c.anyNode(c.serveApt()))
 
 	srv := &http.Server{
 		Handler:           mux,
@@ -115,7 +117,7 @@ func (c *Core) handleHeartbeat(w http.ResponseWriter, r *http.Request, leaf *x50
 	remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	health, _ := json.Marshal(hb.Health)
 
-	addrChanged := false
+	addrChanged, gpusChanged := false, false
 	update := func(n *store.Node) error {
 		if n.State == store.StateReleased {
 			return errReleased
@@ -140,6 +142,7 @@ func (c *Core) handleHeartbeat(w http.ResponseWriter, r *http.Request, leaf *x50
 		if hb.Observed != nil {
 			n.Observed, _ = json.Marshal(hb.Observed)
 			n.ObservedGen, n.Phase = hb.Observed.ObservedGeneration, hb.Observed.Phase
+			gpusChanged = mergeObservedGPUs(n, hb.Observed.GPUs)
 		}
 		return nil
 	}
@@ -163,6 +166,10 @@ func (c *Core) handleHeartbeat(w http.ResponseWriter, r *http.Request, leaf *x50
 	}
 	if hb.Observed != nil && hb.Observed.Network != nil {
 		c.noteSlaveMAC(ctx, hb.NodeID, hb.Observed.Network.MAC)
+	}
+	if gpusChanged {
+		// A new card, or a driver that now reports one: pick its driver.
+		go c.SyncDesired(context.Background(), hb.NodeID)
 	}
 	if addrChanged {
 		// Pool leaders dial their workers by address.

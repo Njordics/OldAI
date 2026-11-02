@@ -26,6 +26,7 @@ import (
 	"aicluster/common/pki"
 	"aicluster/common/proto"
 	"aicluster/common/selfupdate"
+	"aicluster/controller/drivers"
 	"aicluster/controller/modelcache"
 	"aicluster/controller/provision"
 	"aicluster/controller/slavenet"
@@ -75,6 +76,10 @@ type Config struct {
 	// VCS stamp). Installer installs updates; nil means it can't (§13).
 	BuildCommit string
 	Installer   selfupdate.Installer
+	// AptMirror is the Ubuntu archive the Controller copies for its Slaves'
+	// GPU drivers (§14), e.g. http://archive.ubuntu.com/ubuntu. Empty turns
+	// GPU driver installs off.
+	AptMirror string
 }
 
 func (c *Config) defaults() {
@@ -140,6 +145,8 @@ type Core struct {
 	inflight map[string]bool    // node IDs with an adoption or probe running
 	backoff  map[string]backoff // auto-adoption retry schedule
 	roll     rolloutState       // in-place update; see rollout.go
+	mirror   *drivers.Mirror    // nil when GPU drivers are off; see drivers.go
+	drv      driverState
 
 	runCtx context.Context // Run's context, for work started by API calls
 }
@@ -181,6 +188,7 @@ func New(cfg Config, log *slog.Logger) (*Core, error) {
 		return nil, fmt.Errorf("model cache: %w", err)
 	}
 	c.Models.OnReady = c.onModelCached
+	c.setupDrivers()
 	if err := c.setupSlaveNet(ctx); err != nil {
 		log.Error("slave network disabled; Slaves stay on the home network", "err", err)
 	}

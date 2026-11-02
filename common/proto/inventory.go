@@ -18,6 +18,7 @@ type Inventory struct {
 type HostInfo struct {
 	Hostname    string `json:"hostname"`
 	OS          string `json:"os"`
+	Codename    string `json:"codename,omitempty"` // e.g. noble
 	Kernel      string `json:"kernel"`
 	Product     string `json:"product"`
 	ProductUUID string `json:"product_uuid"`
@@ -44,13 +45,17 @@ type DiskInfo struct {
 }
 
 type GPUInfo struct {
-	Index   int        `json:"index"`
-	Vendor  string     `json:"vendor"` // nvidia|amd|intel
-	Model   string     `json:"model"`
-	PCIID   string     `json:"pci_id"`
-	VRAM    uint64     `json:"vram"`
-	Compute GPUCompute `json:"compute"`
-	Driver  GPUDriver  `json:"driver"`
+	Index  int    `json:"index"`
+	Vendor string `json:"vendor"` // nvidia|amd|intel
+	Model  string `json:"model"`
+	PCIID  string `json:"pci_id"`
+	BusID  string `json:"bus_id,omitempty"` // e.g. 0000:01:00.0
+	// Modalias is the kernel's ID string for the card; driver packages
+	// list the modaliases they support.
+	Modalias string     `json:"modalias,omitempty"`
+	VRAM     uint64     `json:"vram"`
+	Compute  GPUCompute `json:"compute"`
+	Driver   GPUDriver  `json:"driver"`
 }
 
 type GPUCompute struct {

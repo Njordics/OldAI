@@ -168,7 +168,7 @@ type OK struct {
 }
 
 // DesiredState is the Controller's declaration of what a Slave should run
-// (§5.1). Driver and OS fields arrive in later build steps.
+// (§5.1). OS fields arrive in a later build step.
 type DesiredState struct {
 	V            int            `json:"v"`
 	Generation   int64          `json:"generation"`
@@ -184,6 +184,40 @@ type DesiredState struct {
 	// Update asks the agent to install a newer build of itself (§13). The
 	// Controller sets it on one node at a time during a rolling update.
 	Update *AgentUpdate `json:"update,omitempty"`
+	// Drivers is the GPU driver the Controller picked for this node's cards
+	// (§14). Absent: leave the node's drivers alone.
+	Drivers *DriverSpec `json:"drivers,omitempty"`
+}
+
+// DriverSpec names Ubuntu packages for a GPU driver. The agent installs them
+// with apt from the Controller's copy of Ubuntu's archive, so Ubuntu's
+// signatures are checked on the node itself.
+type DriverSpec struct {
+	Vendor   string   `json:"vendor"`   // nvidia
+	Name     string   `json:"name"`     // e.g. nvidia-driver-580-server-open
+	Version  string   `json:"version"`  // Ubuntu package version
+	Packages []string `json:"packages"` // to install, kernel modules included
+	// Mirror is the archive's path on the node API, e.g. /apt/ubuntu.
+	Mirror     string   `json:"mirror"`
+	Suites     []string `json:"suites"`     // e.g. noble noble-updates noble-security
+	Components []string `json:"components"` // e.g. main restricted
+}
+
+// Driver states in ObservedDriver.State.
+const (
+	DriverInstalling     = "installing"
+	DriverRebooting      = "rebooting"
+	DriverRebootRequired = "reboot_required" // installed; waiting for permission to reboot
+	DriverReady          = "ready"
+	DriverFailed         = "failed"
+)
+
+// ObservedDriver reports the agent's progress with DesiredState.Drivers.
+type ObservedDriver struct {
+	Name    string `json:"name"`
+	State   string `json:"state"`
+	Version string `json:"version,omitempty"` // as the loaded kernel module reports it
+	Error   string `json:"error,omitempty"`
 }
 
 // AgentUpdate points at the update bundle the Controller serves on its node
@@ -336,6 +370,10 @@ type ObservedState struct {
 	Models             []ObservedModel   `json:"models"`
 	Network            *ObservedNetwork  `json:"network,omitempty"`
 	Update             *ObservedUpdate   `json:"update,omitempty"`
+	Driver             *ObservedDriver   `json:"driver,omitempty"`
+	// GPUs is the node's current GPU list. The Controller replaces the
+	// inventory's with it, so cards show their memory once a driver loads.
+	GPUs []GPUInfo `json:"gpus,omitempty"`
 }
 
 // Versions keys besides "agent", "kernel", "os" and "runtime".

@@ -14,7 +14,9 @@ import (
 // The registry shim listens on loopback only. The runtime (Ollama) pulls
 // "127.0.0.1:7452/library/<model>" from it as an insecure registry, and the
 // shim forwards each request to the Controller's model cache over mTLS, so
-// the runtime never needs the node certificate or internet access.
+// the runtime never needs the node certificate or internet access. apt
+// reaches the Controller's copy of Ubuntu's archive the same way, under
+// /apt/ (GPU drivers, §14).
 
 func (a *Agent) listenShim() error {
 	ln, err := net.Listen("tcp", a.cfg.RegistryShimListen)
@@ -65,7 +67,7 @@ func (a *Agent) handleShim(w http.ResponseWriter, r *http.Request) {
 	if direct {
 		path = strings.TrimPrefix(path, directPrefix)
 	}
-	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !strings.HasPrefix(path, "/v2/") {
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !strings.HasPrefix(path, "/v2/") && !strings.HasPrefix(path, "/apt/") {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -103,7 +105,7 @@ func (a *Agent) handleShim(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		for _, h := range []string{"Range", "Accept", "If-Range"} {
+		for _, h := range []string{"Range", "Accept", "If-Range", "If-Modified-Since"} {
 			if v := r.Header.Get(h); v != "" {
 				req.Header.Set(h, v)
 			}
