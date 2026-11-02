@@ -683,3 +683,37 @@ It returns `{to_node_mbps, from_node_mbps, bytes, at, error}`, which the node de
 - **Automated tests:** a second node copied a model from the first. A third node, sent to two nodes that had just stopped, fell back to the Controller and still got a verified copy. Speed tests over loopback measured 3.5–4 Gb/s, so TLS doesn't limit a 1 Gb link.
 - **Test VMs with real Ollama:** the second Slave's Ollama fetched a 531 MB model file in six 100 MB parts, all from the first Slave, in about a second.
 - **Not tested:** physical 1 Gb links and switches.
+
+## 17. Benchmarks
+
+The dashboard's **Benchmark** tab measures how fast each model runs on each node. It goes through the gateway's own path to the node, so pooled models are measured the way clients use them.
+
+**API** (management, `:8090`):
+- `GET /api/v1/benchmarks` returns `{targets, job, results}`:
+  - `targets`: every model on every online node that serves it, as `{model_id, node_id, node_name, loaded, slots, pool}`;
+  - `job`: the running or last run;
+  - `results`: the saved history, newest first, up to 200, kept in the setting `benchmarks`.
+- `POST /api/v1/benchmarks {targets: [{model_id, node_id}], parallel}` starts a run; `parallel` 0 means as many requests at once as each node serves. It answers `409` while another run is going.
+- `DELETE /api/v1/benchmarks` clears the history.
+
+**One measurement:**
+1. **Cold start.** If the model isn't in memory, a one-token request loads it first, and its duration is `cold_start_s`.
+2. **Busy marking.** The node counts as busy with `parallel` requests, so the gateway sends real requests elsewhere when another node has room.
+3. **The prompt.** Each request is a streamed chat completion: about 600 tokens of fixed prose behind a random prefix, so no prompt cache can skip the reading. It asks for 128 tokens at temperature 0, with `stream_options.include_usage`.
+4. **Timings:**
+   - `ttft_ms`: from sending to the first token;
+   - `prompt_tps`: prompt tokens ÷ time to first token;
+   - `gen_tps`: (tokens − 1) ÷ time from the first to the last token, averaged over parallel requests;
+   - `total_tps`: all parallel requests' tokens ÷ the time from the earliest first token to the latest last one.
+
+   Token counts come from the runtime's usage report. Without one, they are estimated from streamed chunks and words, and `approx` is set.
+5. **Temperature.** `cpu_temp_c` and `hot` are read from the node's next heartbeat (§15).
+
+Targets run one at a time, each with a 5-minute limit.
+
+**Tested:**
+- **Automated tests:** single and parallel runs, a missing model reported as an error, no two runs at once, the history kept and cleared.
+- **Test VM with real Ollama** (`qwen2.5:0.5b` q8_0 on 4 virtual cores):
+  - one request: 26 tokens/s written, 264 tokens/s read, the 581-token prompt read in 2.2 s;
+  - 4 at once: 16 tokens/s each, 45 tokens/s together.
+  - Ollama reported exact token counts.

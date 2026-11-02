@@ -34,8 +34,11 @@ func (f *Fake) startServer() {
 func (f *Fake) InferenceURL() string { return f.url }
 
 type chatReq struct {
-	Model    string `json:"model"`
-	Stream   bool   `json:"stream"`
+	Model         string `json:"model"`
+	Stream        bool   `json:"stream"`
+	StreamOptions *struct {
+		IncludeUsage bool `json:"include_usage"`
+	} `json:"stream_options"`
 	Prompt   string `json:"prompt"`
 	Messages []struct {
 		Role    string `json:"role"`
@@ -137,6 +140,11 @@ func (f *Fake) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	send(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created, "model": req.Model,
 		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": "stop"}}})
+	if req.StreamOptions != nil && req.StreamOptions.IncludeUsage {
+		// Like Ollama and OpenAI: a last chunk with only the token counts.
+		send(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created, "model": req.Model, "choices": []any{},
+			"usage": map[string]int{"prompt_tokens": len(strings.Fields(said)), "completion_tokens": len(words), "total_tokens": len(strings.Fields(said)) + len(words)}})
+	}
 	fmt.Fprint(w, "data: [DONE]\n\n")
 	if fl != nil {
 		fl.Flush()

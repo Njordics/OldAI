@@ -18,6 +18,9 @@ const slaveDomain = "aicluster"
 // setupSlaveNet picks the Slave subnet and adds the Controller's address on
 // it (§12). Runs before the node API listens so the address is advertised.
 // Failure leaves the cluster on the home network only.
+// slaveRouteWait is how long startup waits for a default route.
+var slaveRouteWait = 60 * time.Second
+
 func (c *Core) setupSlaveNet(ctx context.Context) error {
 	mode := c.cfg.SlaveNet
 	if mode == "" || mode == "off" {
@@ -25,9 +28,18 @@ func (c *Core) setupSlaveNet(ctx context.Context) error {
 	}
 	iface := c.cfg.SlaveIface
 	if iface == "" {
+		// At boot the default route can arrive a little after systemd's
+		// network-online; without this wait a power cut could leave the
+		// Slaves unreachable until they give up on the Slave network.
 		var err error
-		if iface, err = slavenet.DefaultRouteIface(); err != nil {
-			return err
+		for deadline := time.Now().Add(slaveRouteWait); ; time.Sleep(2 * time.Second) {
+			if iface, err = slavenet.DefaultRouteIface(); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				return err
+			}
+			c.log.Info("waiting for a default route to set up the Slave network", "err", err)
 		}
 	}
 	stored, err := c.Store.Setting(ctx, "slave_net", "")

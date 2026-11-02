@@ -32,6 +32,8 @@ The Controller image starts `aiclusterd --slave-net=auto` (in `/etc/aicluster/co
 - **Status:** Settings shows the subnet, and each node's details show which network it is on.
 - **Opting out:** set `AICLUSTERD_ARGS=--slave-net=off` and restart `aiclusterd`.
 
+At boot the Controller waits up to 60 s for a default route to pick the interface, since the route can arrive a moment after the network counts as up; without one it leaves the Slave network off (set `--slave-iface` on a network without a router).
+
 A Slave that can't reach the Controller on the new subnet within 90 s rolls back to the home network and retries after 10 minutes. A Slave that loses the Controller for 10 minutes goes back to the home network on its own, and so does a released or factory-reset one. Details: [protocol.md §12](protocol.md#12-slave-network).
 
 The install works without internet; Ubuntu packages come from the ISO itself. With internet it also applies security updates.

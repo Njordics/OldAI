@@ -12,6 +12,7 @@
   <script src="/ui/chat.js" defer></script>
   <script src="/ui/code.js" defer></script>
   <script src="/ui/connect.js" defer></script>
+  <script src="/ui/bench.js" defer></script>
   <script src="/ui/updates.js" defer></script>
 </head>
 <body>
@@ -58,6 +59,7 @@
         <a href="#models" data-tab="models">Models</a>
         <a href="#chat" data-tab="chat">Chat</a>
         <a href="#code" data-tab="code">Code</a>
+        <a href="#bench" data-tab="bench">Benchmark</a>
         <a href="#connect" data-tab="connect">Connect</a>
         <a href="#settings" data-tab="settings">Settings</a>
       </nav>
@@ -112,6 +114,57 @@
       </div>
       <div id="catalog-error" class="banner bad" hidden></div>
       <div id="catalog" class="catalog"></div>
+    </section>
+
+    <!-- Benchmark -->
+    <section id="view-bench" class="view" hidden>
+      <div class="toolbar">
+        <h1>Benchmark</h1>
+      </div>
+      <p class="muted bench-intro">Measures how fast each model runs on each node, through the same path real requests take. Each run sends a fresh 400-word prompt and times how quickly the node reads it and writes a 128-token answer. A token is about ¾ of a word. Runs go one at a time, and while one runs, that node gets other requests only when no other node can take them.</p>
+
+      <div class="table-wrap">
+        <table class="nodes bench-table">
+          <thead>
+            <tr>
+              <th><label class="check bench-pick"><input type="checkbox" id="bench-all"> Model</label></th>
+              <th>Node</th><th class="hide-sm">State</th><th class="hide-sm">Slots</th>
+            </tr>
+          </thead>
+          <tbody id="bench-targets"></tbody>
+        </table>
+      </div>
+      <div class="bench-actions">
+        <label class="field-inline">Requests at once
+          <select id="bench-parallel">
+            <option value="1">1: how one user experiences it</option>
+            <option value="slots">As many as each node serves: total capacity</option>
+          </select>
+        </label>
+        <button class="btn btn-primary btn-sm" id="bench-run" type="button" disabled>Run benchmark</button>
+      </div>
+      <p id="bench-status" class="note" hidden></p>
+
+      <div class="toolbar">
+        <h1>Results</h1>
+        <button class="btn btn-sm" id="bench-clear" type="button" hidden>Clear history</button>
+      </div>
+      <div class="table-wrap bench-scroll">
+        <table class="nodes bench-table">
+          <thead>
+            <tr>
+              <th>When</th><th>Model</th><th>Node</th>
+              <th title="Tokens written per second, per request">Writes (tokens/s)</th>
+              <th title="Prompt tokens read per second">Reads (tokens/s)</th>
+              <th class="hide-sm" title="Time until the first token of the answer">First token</th>
+              <th class="hide-md" title="Requests at once, and tokens written per second by all of them together">At once</th>
+              <th class="hide-md" title="Loading the model from disk, when it wasn't in memory">Cold start</th>
+              <th class="hide-md">CPU after</th>
+            </tr>
+          </thead>
+          <tbody id="bench-results"></tbody>
+        </table>
+      </div>
     </section>
 
     <!-- Chat playground -->

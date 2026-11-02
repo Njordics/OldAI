@@ -67,6 +67,8 @@ type Gateway struct {
 	clients  map[string]*http.Client
 	windows  map[string]*rateWindow
 	touched  map[string]time.Time
+
+	bench benchState // see bench.go
 }
 
 type snapshot struct {

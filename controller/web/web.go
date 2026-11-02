@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /api/v1/settings/login-code", s.rotateLoginCode)
 	s.modelRoutes(api)
 	s.keyRoutes(api)
+	s.benchRoutes(api)
 	s.workspaceRoutes(api)
 	s.updateRoutes(api)
 
