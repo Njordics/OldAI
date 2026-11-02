@@ -29,6 +29,14 @@ type Fake struct {
 	mu     sync.Mutex
 	loaded map[string]bool
 	url    string
+	lastIn []byte // the last chat request body (tests)
+}
+
+// LastChat is the body of the last chat request the fake runtime served.
+func (f *Fake) LastChat() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]byte(nil), f.lastIn...)
 }
 
 func NewFake(dir string) *Fake {

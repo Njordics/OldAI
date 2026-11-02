@@ -99,12 +99,13 @@ function renderConnect() {
   $("#connect-example-model").textContent = exampleModel();
 
   morph($("#keys-list"), conn.keys.length ? `<table class="keys">
-    <thead><tr><th>Name</th><th>Key</th><th class="hide-sm">Models</th><th class="hide-sm">Limit</th><th>Last used</th><th><span class="sr-only">Actions</span></th></tr></thead>
+    <thead><tr><th>Name</th><th>Key</th><th class="hide-sm">Models</th><th class="hide-sm">Limit</th><th class="hide-sm">Memory</th><th>Last used</th><th><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>${conn.keys.map(k => `<tr data-key="${esc(k.id)}">
       <td><strong>${esc(k.name)}</strong><div class="muted">created ${ago(k.created_at)}</div></td>
       <td class="mono">aic_${esc(k.prefix)}…</td>
       <td class="hide-sm">${k.models.length ? k.models.map(esc).join(", ") : `<span class="muted">all</span>`}</td>
       <td class="hide-sm">${k.rpm ? `${k.rpm}/min` : `<span class="muted">none</span>`}</td>
+      <td class="hide-sm"><button class="btn btn-sm btn-ghost" type="button" data-act="key-memory" data-id="${esc(k.id)}" title="Change the memory space">${k.memory ? esc(k.memory) : `<span class="muted">none</span>`}</button></td>
       <td>${ago(k.last_used_at)}</td>
       <td class="actions"><button class="btn btn-sm btn-ghost" type="button" data-act="revoke-key" data-id="${esc(k.id)}">Revoke</button></td>
     </tr>`).join("")}</tbody></table>`
@@ -137,6 +138,7 @@ async function createKey() {
   try {
     const k = await api("POST", "/api/v1/keys", {
       name: $("#key-name").value.trim(), models, rpm: parseInt($("#key-rpm").value, 10) || 0,
+      memory: $("#key-memory").value.trim().toLowerCase(),
     });
     $("#key-secret").textContent = k.key;
     $("#key-reveal").hidden = false;
@@ -177,6 +179,19 @@ async function copyFrom(sel) {
 }
 
 actions["revoke-key"] = id => revokeKey(id);
+actions["key-memory"] = async id => {
+  const k = conn.keys.find(x => x.id === id);
+  const v = prompt(`Memory space for "${k?.name}" (empty for none)`, k?.memory || "");
+  if (v === null) return;
+  try {
+    await api("PUT", `/api/v1/keys/${encodeURIComponent(id)}/memory`, { space: v.trim().toLowerCase() });
+    await loadKeys();
+    renderConnect();
+  } catch (e) {
+    if (e instanceof AuthError) return showLogin();
+    toast(e.message, true);
+  }
+};
 hooks.route.push(view => {
   if (view === "connect") {
     loadKeys().then(renderConnect).catch(e => { if (e instanceof AuthError) showLogin(); });

@@ -227,6 +227,7 @@ Not done yet:
 
 - Structured JSON logs to journald (`slog` in Go, `structlog` in Python). Controller can stream any Slave's agent/runtime logs via `GET /v1/logs` (mTLS) into the dashboard.
 - Prometheus: Controller `:9464/metrics` (gateway latency/queue, node states, rollout state) and `/sd/nodes` (http_sd target list for Slaves). Slave `:9464/metrics` (GPU temp/util/VRAM, runtime in-flight, model load times, reconcile errors).
+- Memory: every model shares one memory per person: instructions and facts, recalled by relevance at the gateway, picked out by a small local model as people chat. Facts unused for 30 days go cold, and a Slave keeps backups the Controller restores from if its own memory goes missing ([protocol.md §18](protocol.md#18-shared-memory)).
 - Benchmarks: the dashboard's Benchmark tab measures each model on each node through the gateway (prompt reading and writing speed, time to first token, total speed with parallel requests) and keeps a history ([protocol.md §17](protocol.md#17-benchmarks)).
 - Network: nodes copy model files from each other so the Controller's single 1 Gb port isn't the bottleneck; links slower than 1 Gb, half duplex or Wi-Fi are flagged, and node details have a speed test ([protocol.md §16](protocol.md#16-1-gb-networks-peer-copying-and-link-checks)).
 - Temperatures and fans: every heartbeat carries the node's sensors, fans and throttling ([protocol.md §15](protocol.md#15-temperatures-and-fans)). The gateway prefers cooler nodes, and Settings → Cooling can have nodes run their fans harder than the firmware would.

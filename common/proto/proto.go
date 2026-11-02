@@ -393,6 +393,9 @@ const (
 	// VersionPeerBlobs is "yes" when the node serves its model files to
 	// other nodes (§16).
 	VersionPeerBlobs = "peer_blobs"
+	// VersionMemoryBackup is "yes" when the node can keep memory backups
+	// for the Controller (§18).
+	VersionMemoryBackup = "memory_backup"
 )
 
 const (

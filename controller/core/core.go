@@ -86,6 +86,9 @@ type Config struct {
 	// PeerMinBlob bytes (default 64 MiB) always come from the Controller.
 	PeerUploads int
 	PeerMinBlob int64
+	// MemoryBackupEvery is how often the Controller checks for memory to
+	// back up or a loss to repair (§18; default 30 s).
+	MemoryBackupEvery time.Duration
 }
 
 func (c *Config) defaults() {
@@ -131,6 +134,9 @@ func (c *Config) defaults() {
 	if c.PeerMinBlob == 0 {
 		c.PeerMinBlob = 64 << 20
 	}
+	if c.MemoryBackupEvery == 0 {
+		c.MemoryBackupEvery = 30 * time.Second
+	}
 }
 
 type Core struct {
@@ -161,6 +167,7 @@ type Core struct {
 	drv      driverState
 	peers    peerState // peer copying; see peers.go
 	nets     netTests
+	membk    memBackups // memory backups; see memorybackup.go
 
 	runCtx context.Context // Run's context, for work started by API calls
 }
@@ -371,7 +378,7 @@ func (c *Core) Run(ctx context.Context) error {
 		c.serveSlaveNet(ctx)
 	}
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){c.discoveryLoop, c.announceLoop, c.monitorLoop} {
+	for _, loop := range []func(context.Context){c.discoveryLoop, c.announceLoop, c.monitorLoop, c.memoryBackupLoop} {
 		wg.Add(1)
 		go func() { defer wg.Done(); loop(ctx) }()
 	}

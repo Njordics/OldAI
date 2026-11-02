@@ -13,6 +13,7 @@
   <script src="/ui/code.js" defer></script>
   <script src="/ui/connect.js" defer></script>
   <script src="/ui/bench.js" defer></script>
+  <script src="/ui/memory.js" defer></script>
   <script src="/ui/updates.js" defer></script>
 </head>
 <body>
@@ -59,6 +60,7 @@
         <a href="#models" data-tab="models">Models</a>
         <a href="#chat" data-tab="chat">Chat</a>
         <a href="#code" data-tab="code">Code</a>
+        <a href="#memory" data-tab="memory">Memory</a>
         <a href="#bench" data-tab="bench">Benchmark</a>
         <a href="#connect" data-tab="connect">Connect</a>
         <a href="#settings" data-tab="settings">Settings</a>
@@ -70,6 +72,8 @@
         <button id="logout" class="btn btn-ghost btn-sm" type="button">Sign out</button>
       </div>
     </header>
+
+    <div id="mem-banner" class="banner mem-banner" role="status" hidden></div>
 
     <!-- Nodes -->
     <section id="view-nodes" class="view" hidden>
@@ -114,6 +118,53 @@
       </div>
       <div id="catalog-error" class="banner bad" hidden></div>
       <div id="catalog" class="catalog"></div>
+    </section>
+
+    <!-- Memory -->
+    <section id="view-memory" class="view" hidden>
+      <div class="toolbar">
+        <h1>Memory</h1>
+        <label class="field-inline">Space <select id="mem-space"></select></label>
+        <label class="check mem-on"><input type="checkbox" id="mem-on"> Memory on</label>
+      </div>
+      <p class="muted mem-intro">Every model on the cluster shares this memory. Instructions go into every chat. Facts go in when they're relevant: hot ones (used in the last 30 days) on a loose match, cold ones only when a question clearly matches. Say "remember that…" or "forget…" in a chat, edit here, or let a small model pick out lasting facts as you chat. <span id="mem-space-keys"></span></p>
+      <p id="mem-off-note" class="banner warn" hidden>Memory is off: chats get none of it, and nothing new is learned. Everything here is kept.</p>
+
+      <div class="card">
+        <h2>Instructions</h2>
+        <ul id="mem-instructions" class="mem-list"></ul>
+        <form id="mem-instruction-form" class="mem-add">
+          <input id="mem-add-instruction" maxlength="400" placeholder="e.g. Keep answers short and use metric units" aria-label="New instruction">
+          <button class="btn btn-sm" type="submit">Add</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="mem-head"><h2>Facts</h2><span id="mem-counts" class="muted"></span>
+          <input id="mem-search" class="search" type="search" placeholder="Search memory" aria-label="Search memory"></div>
+        <ul id="mem-facts" class="mem-list"></ul>
+        <form id="mem-fact-form" class="mem-add">
+          <input id="mem-add-fact" maxlength="400" placeholder="e.g. The user has a border collie called Rex" aria-label="New fact">
+          <button class="btn btn-sm" type="submit">Add</button>
+        </form>
+        <button class="btn btn-sm btn-ghost mem-forget-all" type="button" id="mem-forget-all">Forget everything in this space…</button>
+      </div>
+
+      <div class="card">
+        <h2>Backup</h2>
+        <p class="muted">A copy of all memory goes to one Slave whenever it changes, and at least hourly. Models never read it. If the Controller finds its memory missing or older than the copy, it restores the copy by itself and tells you here.</p>
+        <p id="mem-backup-status"></p>
+        <div class="mem-add">
+          <label class="field-inline">Keep the backup on <select id="mem-backup-node"></select></label>
+          <button class="btn btn-sm" type="button" id="mem-backup-now">Back up now</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Learning</h2>
+        <p class="muted">After each message, a small model reads it for lasting facts about you. With an embeddings model installed (such as nomic-embed-text), facts are matched to questions by meaning; without one, by shared words.</p>
+        <label class="field-inline">Model that picks out facts <select id="mem-model"></select></label>
+      </div>
     </section>
 
     <!-- Benchmark -->
@@ -308,6 +359,7 @@
         <form id="key-form" class="key-form">
           <label class="field"><span>Name</span><input id="key-name" required maxlength="80" placeholder="e.g. laptop, open-webui, ci"></label>
           <label class="field"><span>Requests per minute</span><input id="key-rpm" type="number" min="0" value="0"><small class="muted">0 = no limit</small></label>
+          <label class="field"><span>Memory space</span><input id="key-memory" maxlength="40" placeholder="none" pattern="[a-z0-9][a-z0-9._-]*"><small class="muted">Chats with this key share this memory, e.g. your name; leave empty for apps and automations</small></label>
           <fieldset class="field"><legend>Models</legend>
             <label class="check"><input type="checkbox" id="key-all" checked> All models, including ones installed later</label>
             <div id="key-models" class="key-models" hidden></div>

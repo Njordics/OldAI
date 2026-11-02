@@ -56,6 +56,8 @@ type CreateKeyRequest struct {
 	Name   string   `json:"name"`
 	Models []string `json:"models"`
 	RPM    int      `json:"rpm"`
+	// Memory is the memory space the key's chats use; "" = none (§18).
+	Memory string `json:"memory"`
 }
 
 type CreatedKey struct {
@@ -70,7 +72,16 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, proto.ErrBadRequest, "a name is required")
 		return
 	}
+	if req.Memory != "" && !spaceRe.MatchString(req.Memory) {
+		httpx.WriteError(w, http.StatusBadRequest, proto.ErrBadRequest, "memory space must be lowercase letters, digits, . _ -")
+		return
+	}
 	k, secret, err := s.core.Store.CreateAPIKey(r.Context(), strings.TrimSpace(req.Name), req.Models, req.RPM)
+	if err == nil && req.Memory != "" {
+		if err = s.core.Store.SetAPIKeyMemory(r.Context(), k.ID, req.Memory); err == nil {
+			k.Memory = req.Memory
+		}
+	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, proto.ErrInternal, err.Error())
 		return
@@ -95,7 +106,8 @@ func (s *Server) deleteKey(w http.ResponseWriter, r *http.Request) {
 
 // The playground runs through the same gateway code as API clients, as the
 // signed-in admin, so the dashboard needs no API key.
-var dashboardPrincipal = &gateway.Principal{Name: "dashboard", Admin: true}
+// The dashboard's chat uses the "default" memory space (§18).
+var dashboardPrincipal = &gateway.Principal{Name: "dashboard", Admin: true, Memory: "default"}
 
 func (s *Server) playgroundModels(w http.ResponseWriter, r *http.Request) {
 	if s.gw == nil {

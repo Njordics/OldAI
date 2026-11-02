@@ -128,6 +128,24 @@ var migrations = []string{
 	`ALTER TABLE assignments ADD COLUMN share REAL NOT NULL DEFAULT 0`,
 	`CREATE INDEX assignments_group ON assignments(group_id)`,
 	`CREATE TABLE slave_leases (node_id TEXT PRIMARY KEY, ip TEXT NOT NULL UNIQUE, mac TEXT NOT NULL DEFAULT '')`,
+	// Shared memory (protocol §18).
+	`ALTER TABLE api_keys ADD COLUMN memory TEXT NOT NULL DEFAULT ''`,
+	`CREATE TABLE memories (
+		id TEXT PRIMARY KEY,
+		space TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		text TEXT NOT NULL,
+		pinned INTEGER NOT NULL DEFAULT 0,
+		tier TEXT NOT NULL DEFAULT 'hot',
+		source TEXT NOT NULL DEFAULT '',
+		embedding BLOB,
+		embed_model TEXT NOT NULL DEFAULT '',
+		uses INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL,
+		last_used_at INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE INDEX memories_space ON memories(space)`,
 }
 
 // SlaveLease reserves an address on the Slave network for a node; the MAC

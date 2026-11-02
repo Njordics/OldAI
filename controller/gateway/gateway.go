@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"aicluster/controller/core"
+	"aicluster/controller/memory"
 )
 
 const (
@@ -47,6 +48,8 @@ type Principal struct {
 	Models []string // empty = all
 	RPM    int
 	Admin  bool
+	// Memory is the memory space this caller's chats use; "" = none (§18).
+	Memory string
 }
 
 func (p *Principal) allows(model string) bool {
@@ -69,6 +72,8 @@ type Gateway struct {
 	touched  map[string]time.Time
 
 	bench benchState // see bench.go
+	// Memory gives chats the cluster's shared memory; nil turns it off.
+	Memory *memory.Service
 }
 
 type snapshot struct {
@@ -151,7 +156,7 @@ func (g *Gateway) auth(h func(http.ResponseWriter, *http.Request, *Principal)) h
 			oaiError(w, http.StatusUnauthorized, "invalid_request_error", "invalid_api_key", "Invalid API key.")
 			return
 		}
-		p := &Principal{KeyID: k.ID, Name: k.Name, Models: k.Models, RPM: k.RPM}
+		p := &Principal{KeyID: k.ID, Name: k.Name, Models: k.Models, RPM: k.RPM, Memory: k.Memory}
 		if !g.allowRate(p) {
 			w.Header().Set("Retry-After", "60")
 			oaiError(w, http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded",
@@ -419,6 +424,7 @@ func (g *Gateway) Infer(w http.ResponseWriter, r *http.Request, p *Principal, pa
 		return
 	}
 	stream, _ := req["stream"].(bool)
+	note := g.withMemory(r.Context(), r, p, path, req)
 
 	deadline := start.Add(g.cfg.QueueTimeout)
 	tried := map[string]bool{}
@@ -458,6 +464,9 @@ func (g *Gateway) Infer(w http.ResponseWriter, r *http.Request, p *Principal, pa
 		g.respond(w, resp, rep, model, stream)
 		resp.Body.Close()
 		g.release(rep.NodeID, false)
+		if resp.StatusCode < 400 {
+			g.afterMemory(p, req, note)
+		}
 		g.log.Info("request served", "key", p.Name, "model", model, "node", rep.NodeName, "status", resp.StatusCode,
 			"stream", stream, "took", time.Since(start).Round(time.Millisecond))
 		return

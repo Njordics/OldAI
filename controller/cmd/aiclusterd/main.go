@@ -20,6 +20,7 @@ import (
 	"aicluster/common/selfupdate"
 	"aicluster/controller/core"
 	"aicluster/controller/gateway"
+	"aicluster/controller/memory"
 	"aicluster/controller/updates"
 	"aicluster/controller/web"
 )
@@ -104,9 +105,16 @@ func main() {
 		gw = gateway.New(c, gwCfg, log.With("component", "gateway"))
 		srv.WithGateway(gw, gwLn.Addr().(*net.TCPAddr).Port)
 	}
+	// Shared memory for every model's chats (protocol §18).
+	mem := &memory.Service{Store: c.Store, Log: log.With("component", "memory"), Enabled: c.MemoryEnabled}
+	if gw != nil {
+		mem.AI, gw.Memory = gw.MemoryAI(), mem
+	}
+	srv.WithMemory(mem)
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return c.Run(ctx) })
 	g.Go(func() error { checker.Run(ctx); return nil })
+	g.Go(func() error { mem.Run(ctx); return nil })
 	g.Go(func() error { return srv.Serve(ctx, mgmtLn) })
 	if gw != nil {
 		g.Go(func() error { return gw.Serve(ctx, gwLn) })

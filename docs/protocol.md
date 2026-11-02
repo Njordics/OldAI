@@ -719,3 +719,68 @@ Targets run one at a time, each with a 5-minute limit.
   - one request: 26 tokens/s written, 264 tokens/s read, the 581-token prompt read in 2.2 s;
   - 4 at once: 16 tokens/s each, 45 tokens/s together.
   - Ollama reported exact token counts.
+
+## 18. Shared memory
+
+Every model on the cluster shares one memory of the people using it. It lives in the Controller's database and goes into requests at the gateway. Models never see it otherwise, and it never leaves the cluster.
+
+**Spaces.** Memories belong to a space, usually one person. An API key's `memory` field picks its space; empty means none, which suits apps and automations. Several keys can share a space. The dashboard's chat uses `default`. Settings → Memory (`memory` = `on`|`off`) turns memory off for everyone without deleting anything.
+
+**What is kept** (table `memories`): `{id, space, kind, text, pinned, tier, source, embedding, embed_model, uses, created_at, updated_at, last_used_at}`.
+- **Kinds:** `instruction` ("keep answers short") or `fact` ("The user has a border collie called Rex.").
+- **Sources:** `you` (said or typed by the user), `learned` (picked out by a model) or `restored`.
+- **Change count:** every change adds one to the setting `memory_generation`, which backups carry.
+
+**In a chat** (`POST /v1/chat/completions` with a key that has a space, unless the request sends `X-AICluster-Memory: off`):
+1. **Commands.** A message starting "remember (that) …" is stored as a fact in the user's words: `The user asked you to remember: …`. One starting "forget (that|about) …" deletes the facts that match it.
+2. **Recall.** It builds the note for the last user message:
+   - **Always included:** instructions and pinned facts.
+   - **Hot facts** (used or added within 30 days): also included, as a constant reference. When they don't all fit, the ones matching the message come first: similarity 0.35, or one shared word.
+   - **Cold facts:** included only on a clear match, similarity 0.55 or two shared words.
+   - **Matching:** by cosine similarity of embeddings when an embedding model is installed (catalog capability `embeddings`), otherwise by shared words, leaving out common words. Without embeddings, cold facts only come back when the question uses the same words.
+   - **Limits:** at most 20 facts and about 400 tokens. On a processor-only node that is up to a second or two of prompt reading, but the note stays the same from one message to the next, so the runtime mostly reuses its reading.
+3. **The note.** The selection goes in front of the request as a system message, merged into the client's own system prompt if there is one. The order stays the same from one message to the next, so the runtime can reuse its reading of it.
+4. **After the reply,** the facts used count as used, which keeps them hot. In the background, the message is read for lasting facts:
+   - **Model:** the Settings choice, or the smallest installed chat model of at least about 1 GB (about 1.5B parameters) that doesn't reason first. A smaller one is used only if nothing bigger is installed; on the test VMs a 0.5B model copied the prompt's placeholder instead of reading the message.
+   - **Input:** the message, plus up to 15 related known facts.
+   - **Output:** JSON `{"add": [...], "update": [{"n", "text"}], "remove": [n]}`. At most 5 additions are taken, and a reply that isn't JSON changes nothing.
+   - **Grounding:** a new or updated fact must share a meaningful word with the message, and may not be one of the prompt's examples. This drops copied placeholders, copied examples and invented facts.
+   - **Limits:** it may not remove facts the user added themselves. One message per space is read at a time.
+   - **Skipped:** messages under 15 characters, code, and commands.
+
+Hourly, facts unused for 30 days go cold and missing embeddings are filled in.
+
+**Management API:**
+- `GET /api/v1/memory?space=` returns spaces, memories, backup state and notice.
+- `POST /api/v1/memory` adds; `PUT` and `DELETE /api/v1/memory/{id}` change or delete.
+- `POST /api/v1/memory/forget-space` deletes a whole space.
+- `PUT /api/v1/memory/settings {enabled, backup_node, model}`.
+- `POST /api/v1/memory/backup` and `POST /api/v1/memory/restore {node_id}`.
+- `GET /api/v1/memory/notice` and `POST /api/v1/memory/notice/dismiss`.
+- `PUT /api/v1/keys/{id}/memory {space}`.
+
+**Backup.** One Slave keeps copies of all memory for the Controller. Models never read them.
+- **Which node:** the setting `memory_backup_node`, or by default the online node with the most free disk that reports `versions.memory_backup`.
+- **When:** every 30 s the Controller sends a copy if memory changed or the last copy is over an hour old. It is a gzipped JSON `{cluster_id, generation, saved_at, memories}`, sent with `PUT /v1/memory-backup` on the agent, with the cluster, change count, number of memories and SHA-256 in headers.
+- **Never from an empty cluster:** a Controller that has never had any memory sends nothing, so a freshly installed one can't overwrite a backup it may still need.
+- **On the node:** the agent keeps the last 5 copies in `<data dir>/memory-backup` (mode 0600). It keeps them when the node is released, because that is when a reinstalled Controller needs them. Reinstalling the node erases them. They are stored unencrypted, like the Controller's database.
+
+**Loss and restore.** For 10 minutes after start, then every 10 minutes, the Controller asks every backup-capable node about its newest copy (`GET /v1/memory-backup/info`).
+- **A copy from this cluster** is restored by itself (`GET /v1/memory-backup`, SHA-256 checked) when:
+  - it is at a later change than the Controller's memory, as after a database restored from an older copy; or
+  - the Controller's memory is empty while the copy is at least as new.
+
+  A deliberate "forget everything" raises the change count, so it is never undone. A notice says what was restored, from which node, how old the copy is, and how many memories the Controller had.
+- **A copy from another cluster,** as after reinstalling the Controller, is only offered, and only while this Controller has no memory. The dashboard shows "found", and restoring it is the user's choice. The change count then continues past both, so the next backup replaces the old cluster's copy.
+
+**Tested:**
+- **Automated tests:**
+  - recall by words and by embeddings, and hot versus cold;
+  - remember and forget, and learning from a model reply (including that it can't remove the user's own facts);
+  - memory in chats through the gateway, and none for keys without a space or requests that opt out;
+  - a backup reaching a node, an automatic restore after the Controller lost its memory, and a foreign backup offered, then restored on request.
+- **Dev cluster:** the dashboard showed a remembered fact, an instruction and the first backup.
+- **Test VMs with real Ollama:**
+  - From "My border collie Rex turns five next week, and we just moved from Leeds to York", `qwen2.5:1.5b` learned "Rex is a border collie turning five next week." and "The user moved from Leeds to York."
+  - Asked "What breed is my dog, and which city do I live in now?", it answered "Rex is a border collie, and you live in York now."
+  - The backup reached a Slave as two copies, readable only by root.

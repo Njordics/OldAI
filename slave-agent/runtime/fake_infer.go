@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -63,7 +64,11 @@ func (f *Fake) has(model string) bool {
 
 func (f *Fake) chat(w http.ResponseWriter, r *http.Request) {
 	var req chatReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	f.mu.Lock()
+	f.lastIn = body
+	f.mu.Unlock()
+	if err := json.Unmarshal(body, &req); err != nil {
 		oaiError(w, http.StatusBadRequest, err.Error())
 		return
 	}

@@ -118,8 +118,9 @@ func TestChoose(t *testing.T) {
 	if _, err := ix.Choose([]string{"pci:v000010DEd0000FFFFsv0sd0bc03sc00i00"}, "6.8.0-48-generic"); !errors.Is(err, ErrNoDriver) {
 		t.Fatalf("unknown card: %v", err)
 	}
-	if _, err := ix.Choose([]string{ada}, "weird"); err == nil {
-		t.Fatal("chose modules for a kernel it can't parse")
+	// A kernel name that isn't Ubuntu's falls back to the main line.
+	if c, err := ix.Choose([]string{ada}, "6.18.54.1-microsoft-standard-WSL2"); err != nil || c.Packages[2] != "linux-modules-nvidia-580-server-open-generic" {
+		t.Fatalf("unknown kernel: %+v %v", c, err)
 	}
 }
 

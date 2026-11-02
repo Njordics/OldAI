@@ -22,11 +22,13 @@ import (
 // every request. The first 8 characters after "aic_" are kept in clear to
 // find the row and to show in the UI.
 type APIKey struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Prefix     string    `json:"prefix"`
-	Models     []string  `json:"models"` // empty = all models
-	RPM        int       `json:"rpm"`    // requests per minute, 0 = unlimited
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Prefix string   `json:"prefix"`
+	Models []string `json:"models"` // empty = all models
+	RPM    int      `json:"rpm"`    // requests per minute, 0 = unlimited
+	// Memory is the memory space the key's chats use; "" = no memory (§18).
+	Memory     string    `json:"memory"`
 	CreatedAt  time.Time `json:"created_at"`
 	LastUsedAt time.Time `json:"last_used_at"`
 }
@@ -65,7 +67,7 @@ func scanKey(r scanner) (*APIKey, string, error) {
 	var k APIKey
 	var hash, models string
 	var created, used int64
-	if err := r.Scan(&k.ID, &k.Name, &k.Prefix, &hash, &models, &k.RPM, &created, &used); err != nil {
+	if err := r.Scan(&k.ID, &k.Name, &k.Prefix, &hash, &models, &k.RPM, &created, &used, &k.Memory); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, "", ErrNotFound
 		}
@@ -79,7 +81,7 @@ func scanKey(r scanner) (*APIKey, string, error) {
 	return &k, hash, nil
 }
 
-const keyCols = `id,name,prefix,hash,models,rpm,created_at,last_used_at`
+const keyCols = `id,name,prefix,hash,models,rpm,created_at,last_used_at,memory`
 
 func (s *Store) ListAPIKeys(ctx context.Context) ([]*APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+keyCols+` FROM api_keys ORDER BY created_at`)
@@ -116,6 +118,18 @@ func (s *Store) VerifyAPIKey(ctx context.Context, secret string) (*APIKey, error
 
 func (s *Store) DeleteAPIKey(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM api_keys WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetAPIKeyMemory sets the memory space a key's chats use ("" = none).
+func (s *Store) SetAPIKeyMemory(ctx context.Context, id, space string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE api_keys SET memory=? WHERE id=?`, space, id)
 	if err != nil {
 		return err
 	}

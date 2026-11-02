@@ -18,6 +18,7 @@ import (
 	"aicluster/common/proto"
 	"aicluster/controller/core"
 	"aicluster/controller/gateway"
+	"aicluster/controller/memory"
 	"aicluster/controller/store"
 	"aicluster/controller/updates"
 )
@@ -26,6 +27,7 @@ type Server struct {
 	core    *core.Core
 	log     *slog.Logger
 	gw      *gateway.Gateway
+	mem     *memory.Service
 	gwPort  int
 	updates *updates.Checker
 	limiter *loginLimiter
@@ -49,6 +51,7 @@ func (s *Server) Handler() http.Handler {
 	s.modelRoutes(api)
 	s.keyRoutes(api)
 	s.benchRoutes(api)
+	s.memoryRoutes(api)
 	s.workspaceRoutes(api)
 	s.updateRoutes(api)
 

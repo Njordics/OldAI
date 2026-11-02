@@ -42,6 +42,10 @@ func (a *Agent) routes() http.Handler {
 	mux.HandleFunc("GET /v1/rpc-tunnel/{group}", a.handleRPCTunnel)
 	// Other nodes copy model files from this one (§16).
 	mux.Handle("GET /v2/blobs/{digest}", a.nodeOnly(a.handlePeerBlob))
+	// Copies of the cluster's memory, kept for the Controller only (§18).
+	mux.Handle("PUT /v1/memory-backup", a.controllerOnly(a.handleMemBackupPut))
+	mux.Handle("GET /v1/memory-backup", a.controllerOnly(a.handleMemBackupGet))
+	mux.Handle("GET /v1/memory-backup/info", a.controllerOnly(a.handleMemBackupInfo))
 	mux.Handle("GET /v1/nettest", a.controllerOnly(a.handleNetTestSend))
 	mux.Handle("POST /v1/nettest", a.controllerOnly(a.handleNetTestReceive))
 	return mux
@@ -144,6 +148,7 @@ func (a *Agent) observed() *proto.ObservedState {
 		versions["runtime"] = a.rt.Kind()
 	}
 	update := a.updateVersions(versions)
+	versions[proto.VersionMemoryBackup] = "yes"
 	if a.blobFile("sha256:"+strings.Repeat("0", 64)) != "" {
 		versions[proto.VersionPeerBlobs] = "yes"
 	}

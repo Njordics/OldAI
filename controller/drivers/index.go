@@ -242,8 +242,9 @@ var kernelRe = regexp.MustCompile(`^(\d+\.\d+)\.\d+-\d+-([a-z0-9-]+)$`)
 // reboots into it when the running kernel has no module.
 func (ix *Index) modulesFor(base, kernel string) (string, error) {
 	m := kernelRe.FindStringSubmatch(kernel)
-	if m == nil && kernel == "" && ix.Has(base+"-generic") {
-		return base + "-generic", nil // not reported; Ubuntu's main line
+	if m == nil && ix.Has(base+"-generic") {
+		// Not reported, or not an Ubuntu kernel name: Ubuntu's main line.
+		return base + "-generic", nil
 	}
 	if m == nil {
 		return "", fmt.Errorf("can't tell the kernel line of %q", kernel)
