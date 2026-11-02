@@ -98,10 +98,12 @@ slave)
 	fi
 	if [ -d "$lc" ]; then
 		# Images that kept llama.cpp as loose files lost its library symlinks
-		# when written to a FAT32 USB stick: they arrived as empty files.
-		# Point each one back at the versioned library it stood for.
+		# when written to a FAT32 USB stick: they arrived as empty or tiny
+		# files (some tools write the link's target as text). No real library
+		# is that small, so point each one back at the versioned library it
+		# stood for.
 		for f in "$lc"/lib*.so*; do
-			[ -f "$f" ] && [ ! -L "$f" ] && [ ! -s "$f" ] || continue
+			[ -f "$f" ] && [ ! -L "$f" ] && [ "$(stat -c %s "$f")" -lt 4096 ] || continue
 			to=$(cd "$lc" && ls -d "$(basename "$f")".* 2>/dev/null | awk '{print length, $0}' | sort -n | head -n1 | cut -d' ' -f2-) || true
 			if [ -n "$to" ]; then
 				ln -sfn "$to" "$f"
