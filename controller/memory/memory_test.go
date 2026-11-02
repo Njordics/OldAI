@@ -192,12 +192,13 @@ func TestLearn(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, _ := s.Store.ListMemories(ctx, "me")
-	if len(after) != len(before)+1 || !strings.Contains(after[len(after)-1].Text, "red van") {
-		var got []string
-		for _, m := range after {
-			got = append(got, m.Text)
-		}
-		t.Fatalf("after filtering: %q", got)
+	var now []string
+	for _, m := range after {
+		now = append(now, m.Text)
+	}
+	// Facts saved in the same second list in no particular order.
+	if len(after) != len(before)+1 || !strings.Contains(strings.Join(now, " | "), "red van") {
+		t.Fatalf("after filtering: %q", now)
 	}
 	// A reply that isn't JSON changes nothing.
 	ai.reply = "I don't think there's anything to remember."
