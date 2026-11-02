@@ -19,6 +19,7 @@ import (
 
 	"aicluster/common/pki"
 	"aicluster/common/proto"
+	"aicluster/common/selfupdate"
 	"aicluster/slave-agent/inventory"
 	"aicluster/slave-agent/netcfg"
 	"aicluster/slave-agent/runtime"
@@ -70,6 +71,10 @@ type Config struct {
 	// ManageNetwork lets the agent move its interface onto the Controller's
 	// Slave network when asked (Linux with systemd-networkd only).
 	ManageNetwork bool
+	// BuildCommit is reported as the running commit (default: the binary's
+	// VCS stamp). Installer installs updates; nil means this node can't.
+	BuildCommit string
+	Installer   selfupdate.Installer
 }
 
 func (c *Config) defaults() {
@@ -105,6 +110,9 @@ func (c *Config) defaults() {
 	}
 	if c.InferenceSlots == 0 {
 		c.InferenceSlots = 4
+	}
+	if c.BuildCommit == "" {
+		c.BuildCommit = selfupdate.BuildCommit()
 	}
 }
 
@@ -149,6 +157,8 @@ type Agent struct {
 	netMgr *netcfg.Manager // nil when this node can't switch networks
 	net    netState
 	netC   chan struct{}
+
+	upd updState
 }
 
 func New(cfg Config, log *slog.Logger) (*Agent, error) {
@@ -169,6 +179,7 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	}
 	a.loadManaged()
 	a.initNetwork()
+	a.initUpdate()
 	a.pools.entries = map[string]*poolEntry{}
 	switch cfg.Runtime {
 	case "ollama":
@@ -284,7 +295,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	tlsLn := tls.NewListener(a.ln, a.serverTLS())
 
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator, a.serveShim, a.modelLoop, a.netLoop} {
+	for _, loop := range []func(context.Context){a.announceLoop, a.heartbeatLoop, a.controllerLocator, a.pairingRotator, a.serveShim, a.modelLoop, a.netLoop, a.updateLoop} {
 		wg.Add(1)
 		go func() { defer wg.Done(); loop(ctx) }()
 	}

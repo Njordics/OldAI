@@ -22,10 +22,10 @@ json_field() { # file key
 		echo
 		echo "  Dashboard:    https://\\4:8090"
 		echo "  OpenAI API:   http://\\4:8080/v1"
-		if [ -s "$dir/admin.token" ]; then
-			echo "  Admin token:  $(cat "$dir/admin.token")"
+		if [ -s "$dir/login.code" ]; then
+			echo "  Login code:   $(cat "$dir/login.code")"
 		else
-			echo "  Admin token:  (starting up...)"
+			echo "  Login code:   (starting up...)"
 		fi
 		if [ -s "$dir/ca/ca.crt" ]; then
 			fp=$(openssl x509 -in "$dir/ca/ca.crt" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)

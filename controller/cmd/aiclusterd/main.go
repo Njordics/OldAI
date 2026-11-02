@@ -10,12 +10,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"aicluster/common/selfupdate"
 	"aicluster/controller/core"
 	"aicluster/controller/gateway"
 	"aicluster/controller/updates"
@@ -49,6 +51,7 @@ func main() {
 	updateAPI := flag.String("update-api", updates.DefaultAPI, "GitHub API used for update checks")
 	updateEvery := flag.Duration("update-interval", updates.DefaultInterval, "how often to check GitHub for updates")
 	assumeCommit := flag.String("assume-build-commit", "", "testing: pretend this Controller was built from this commit")
+	updateDir := flag.String("update-dir", selfupdate.DefaultDir, "where update bundles are staged for the root updater (empty: no in-place updates)")
 	flag.StringVar(&logLevel, "log-level", "info", "debug|info|warn|error")
 	flag.Parse()
 	if advertise != "" {
@@ -62,6 +65,14 @@ func main() {
 	_ = lvl.UnmarshalText([]byte(logLevel))
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}))
 
+	build := updates.CurrentBuild(version)
+	if *assumeCommit != "" {
+		build.Commit, build.Time = *assumeCommit, time.Time{}
+	}
+	cfg.BuildCommit = build.Commit
+	if *updateDir != "" && runtime.GOOS == "linux" {
+		cfg.Installer = selfupdate.FileInstaller{Path: *updateDir}
+	}
 	c, err := core.New(cfg, log)
 	if err != nil {
 		log.Error("init failed", "err", err)
@@ -76,10 +87,6 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	build := updates.CurrentBuild(version)
-	if *assumeCommit != "" {
-		build.Commit, build.Time = *assumeCommit, time.Time{}
-	}
 	checker := updates.New(build, web.UpdateSettings(c.Store), log.With("component", "updates"))
 	checker.API, checker.Interval = *updateAPI, *updateEvery
 	checker.Offline = c.Models.Offline.Load

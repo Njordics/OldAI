@@ -39,6 +39,8 @@ func (c *Core) serveNodeAPI(ctx context.Context) error {
 	mux.Handle("POST /v1/nodes/{id}/events", c.nodeOnly(c.handleEvent))
 	// Read-only model registry backed by the Controller's cache (§8).
 	mux.Handle("GET /v2/", c.anyNode(c.Models))
+	// The update bundle being rolled out (§13).
+	mux.Handle("GET "+bundlePath, c.anyNode(http.HandlerFunc(c.serveBundle)))
 
 	srv := &http.Server{
 		Handler:           mux,

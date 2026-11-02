@@ -28,9 +28,12 @@ type Server struct {
 	gw      *gateway.Gateway
 	gwPort  int
 	updates *updates.Checker
+	limiter *loginLimiter
 }
 
-func New(c *core.Core, log *slog.Logger) *Server { return &Server{core: c, log: log} }
+func New(c *core.Core, log *slog.Logger) *Server {
+	return &Server{core: c, log: log, limiter: newLoginLimiter()}
+}
 
 func (s *Server) Handler() http.Handler {
 	api := http.NewServeMux()
@@ -41,6 +44,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /api/v1/nodes/{id}/release", s.release)
 	api.HandleFunc("GET /api/v1/settings", s.getSettings)
 	api.HandleFunc("PUT /api/v1/settings", s.putSettings)
+	api.HandleFunc("POST /api/v1/settings/login-code", s.rotateLoginCode)
 	s.modelRoutes(api)
 	s.keyRoutes(api)
 	s.workspaceRoutes(api)

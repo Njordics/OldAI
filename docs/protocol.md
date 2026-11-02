@@ -403,6 +403,7 @@ Quant preference order (best first): `bf16/fp16 > q8_0 > q6_K > q5_K_M > awq/gpt
 | `POST /v1/nodes/{id}/renew` | §5.4 |
 | `POST /v1/nodes/{id}/events` | async events: `{"kind":"model_failed|driver_failed|reboot|oom|thermal_throttle", "detail":{…}}` |
 | `GET /v2/…` | OCI distribution API (read-only) — pull-through cache of `registry.ollama.ai`, used by the Slave's loopback shim |
+| `GET /v1/update/bundle` | the update bundle being rolled out (§13); any adopted node |
 | `GET /blobs/{path}` | GGUF / safetensors / wheel files from the model cache; supports `Range`; response header `X-Content-SHA256` |
 | `GET /apt/{…}` | apt proxy (Ubuntu archive, NVIDIA CUDA repo, ROCm repo) |
 | `GET /repo/{…}` | signed aicluster apt repo (agent, runtimes, whisper) |
@@ -448,8 +449,17 @@ GET  /api/v1/updates             {enabled, repo, branch, current{version,commit,
                                   behind, commits[] (newest first), compare_url, checked_at, error, note, dismissed}
 POST /api/v1/updates/check       check now
 POST /api/v1/updates/dismiss     {commit}   "skip this version"; the pop-up returns for anything newer
+POST /api/v1/updates/apply       {commit}   rolling update to the branch's newest commit (§13); 409 if it isn't the
+                                            newest any more or an update is running, 502 if its bundle isn't published
 PUT  /api/v1/settings            {update_check: bool, update_repo: "owner/name", update_branch: "main"}
 ```
+
+`GET /api/v1/updates` also returns:
+- `can_apply`, and `apply_blocked` with the reason this Controller can't update itself.
+- `rollout`, the current or last update:
+  - `target`, `message`, `error`;
+  - `phase`: `downloading`, `controller`, `slaves`, `done` or `failed`;
+  - `nodes[]`, each with a `detail` and a `state`: `waiting`, `updating`, `updated`, `failed` or `skipped`.
 
 The dashboard's chat playground calls the same routing code through `POST /api/v1/playground/chat/completions` with the admin session instead of a key. Response header `X-AICluster-Node` names the serving node (can be disabled).
 
@@ -457,7 +467,13 @@ The dashboard's chat playground calls the same routing code through `POST /api/v
 
 ## 10. Management API (`:8090`)
 
-REST over HTTPS (self-signed by the cluster CA; CLI pins it). Auth: admin token (created at install, shown on Controller console, rotatable), or unix socket as root. Endpoints mirror the CLI:
+REST over HTTPS (self-signed by the cluster CA; CLI pins it). Auth: the admin token as `Authorization: Bearer` (CLI, scripts), or a dashboard session cookie from `POST /session {"token"}`, which takes the admin token or the **login code**.
+- **Login code:** 8 Crockford-base32 characters, shown on the Controller console as `XXXX-XXXX`. Case, dashes and look-alikes (O/0, I/L/1) don't matter.
+- **Rate limits** on `/session` (answered with `429` + `Retry-After`):
+  - per address: 5 free attempts, then 1, 2, 4… minutes, up to 1 h;
+  - overall: 30 failed code attempts per 10 min. The full token skips this cap, so a flood of guesses can't lock the admin out.
+- **Rotation:** `POST /api/v1/settings/login-code` replaces the code; existing sessions stay valid.
+- **Unix socket:** as root, also accepted. Endpoints mirror the CLI:
 
 ```
 GET    /api/v1/nodes                        GET  /api/v1/nodes/{id}
@@ -515,3 +531,42 @@ With `aiclusterd --slave-net=auto` (the Controller ISO's default), adopted Slave
 - the node is released, or factory reset from its console;
 - the desired state no longer has `network`;
 - there has been no successful heartbeat for 10 minutes, for example because the Controller is gone or broken. The node is then discoverable on the home network again, and the handoff repeats once the Controller is back.
+
+## 13. In-place updates
+
+The dashboard's **Update Controller and Slaves now** button installs the branch's newest commit on the whole cluster without reinstalling.
+
+**Bundle.** CI (`.github/workflows/update-bundle.yml`) runs `make update-bundle` on every push. It publishes two assets on the rolling pre-release `update-<branch>`:
+- `aicluster-update-linux-amd64.tar.gz`, a single `aicluster/` directory with:
+  - all three binaries, the provisioner and the catalog;
+  - the systemd units, `install-target.sh`, `apply-update` and `manifest.json`.
+
+  The model runtimes (Ollama, llama.cpp) are not in it and stay as installed.
+- `manifest.json`: `{"commit","version","built"}`.
+
+**Controller**
+1. **Check:** `POST /api/v1/updates/apply` confirms the published manifest is for the commit being installed. If CI hasn't finished, it says so and changes nothing.
+2. **Download and verify:**
+   - It downloads the bundle and checks its SHA-256 against the digest GitHub records for the asset.
+   - It unpacks the bundle into `/var/lib/aicluster/update/staged`. Only regular files and directories are allowed, and no path may point outside that directory.
+   - It checks the manifest inside the bundle.
+3. **Install:** it writes `/var/lib/aicluster/update/request`, and `aicluster-update.path` starts `apply-update` as root, which:
+   - stops `aiclusterd` and backs up the files it will replace, plus the database;
+   - runs the bundle's `install-target.sh controller` and restarts the services;
+   - requires `aiclusterd` to stay active without restarting for 20 s, within 90 s;
+   - otherwise restores the backup and the database and restarts the old version.
+
+   Either way it leaves `result.json` behind.
+4. **Resume:** progress is kept in the `update_rollout` setting.
+   - If the restarted Controller runs the target commit, it moves on to the nodes.
+   - If it is still on the old commit, it reports the updater's error.
+
+**Slaves**, one at a time, sorted by name:
+1. **Skip** nodes that are offline, already on the target, or can't update themselves. A node can when it reports `versions.self_update = "yes"`. Agents older than this feature don't report it and need one reinstall from a current Slave ISO.
+2. **Signal:** add `update: {commit, path: "/v1/update/bundle", sha256, size}` to the node's desired state.
+3. **Download:** the agent downloads the bundle over mTLS, checks the SHA-256, unpacks it, checks the manifest and requests the install. It reports progress as `observed.update {commit, state: downloading|installing|failed, error}`.
+4. **Install:** `apply-update` runs `install-target.sh slave`, restarts `aicluster-agent` and checks it the same way, rolling back on failure.
+5. **Confirm:** the node is done when its heartbeat reports `versions.agent_commit` equal to the target. The update is then removed from its desired state.
+6. **Stop on failure:** a node that reports `failed`, or isn't back within 10 minutes, fails the rollout. The remaining nodes are left untouched, since a bad build would most likely break them all. Pressing Update again retries the nodes that aren't current.
+
+**Trust.** The updater runs whatever the bundle contains as root, so anyone who can push to the configured branch can update every cluster that follows it. The SHA-256 check guards against corrupted or swapped downloads, not against a compromised repository. Point Settings → Updates at a repository and branch you control.

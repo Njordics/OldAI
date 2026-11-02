@@ -19,12 +19,13 @@
   <main id="login" class="login" hidden>
     <form id="login-form" class="login-card">
       <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span>AI Cluster</div>
-      <p class="muted">Sign in with the Controller's admin token.</p>
+      <p class="muted">Sign in with the login code shown on the Controller's screen.</p>
       <label class="field">
-        <span>Admin token</span>
-        <input id="login-token" type="password" autocomplete="current-password" required spellcheck="false">
+        <span>Login code</span>
+        <input id="login-token" class="mono login-code" type="password" autocomplete="current-password" required
+               spellcheck="false" autocapitalize="characters" placeholder="XXXX-XXXX">
       </label>
-      <p class="hint">On the Controller: <code>sudo cat /var/lib/aicluster/controller/admin.token</code></p>
+      <p class="hint">Case and dash don't matter. The full admin token works too.</p>
       <p id="login-error" class="error" role="alert" hidden></p>
       <button class="btn btn-primary" type="submit">Sign in</button>
 
@@ -296,11 +297,21 @@
           </div>
         </form>
         <dl class="kv" id="update-info"></dl>
+        <div id="update-rollout" class="update-progress" hidden></div>
       </div>
 
       <div class="card">
         <h2>Cluster</h2>
         <dl class="kv" id="cluster-info"></dl>
+      </div>
+
+      <div class="card">
+        <h2>Login code</h2>
+        <p class="muted">The Controller's screen shows the code for signing in here. Make a new one if someone saw it who shouldn't have. You stay signed in, and the screen shows the new code within seconds.</p>
+        <div class="row">
+          <button class="btn" type="button" id="rotate-code">New login code</button>
+          <span class="mono login-code" id="new-code" hidden></span>
+        </div>
       </div>
     </section>
   </div>
@@ -400,19 +411,26 @@
   <!-- Update available -->
   <dialog id="update-dialog" class="dialog dialog-wide">
     <form method="dialog">
-      <h2>Update available</h2>
-      <p id="update-summary" class="muted"></p>
-      <ul id="update-commits" class="update-commits"></ul>
-      <details class="update-how">
-        <summary>How to update</summary>
-        <p>On the machine you build the Controller from:</p>
-        <pre class="snippet" id="update-steps"></pre>
-        <p class="hint">Slaves keep running while the Controller restarts. One-click, rolling updates arrive with the Controller OS image.</p>
-      </details>
+      <h2 id="update-title">Update available</h2>
+      <div id="update-offer">
+        <p id="update-summary" class="muted"></p>
+        <ul id="update-commits" class="update-commits"></ul>
+        <details class="update-how" id="update-manual" hidden>
+          <summary>Why can't this Controller update itself?</summary>
+          <p id="update-blocked"></p>
+          <p>Reinstall it once from a current Controller ISO; after that the button here installs updates. Or update by hand on the machine you build the Controller from:</p>
+          <pre class="snippet" id="update-steps"></pre>
+        </details>
+        <p class="hint" id="update-apply-hint" hidden>The Controller installs the update and restarts (the dashboard reconnects by itself), then updates the nodes one at a time. A node serving a model is briefly unavailable while its agent restarts. If anything fails to come back, it is rolled back.</p>
+      </div>
+      <div id="update-progress" class="update-progress" hidden aria-live="polite"></div>
+      <p id="update-apply-error" class="error" role="alert" hidden></p>
       <div class="dialog-actions update-dialog-actions">
         <button class="btn btn-ghost" type="button" id="update-skip">Skip this version</button>
         <button class="btn btn-ghost" type="button" id="update-later">Remind me tomorrow</button>
-        <a class="btn btn-primary" id="update-github" target="_blank" rel="noopener noreferrer">View changes on GitHub</a>
+        <a class="btn btn-ghost" id="update-github" target="_blank" rel="noopener noreferrer">View changes</a>
+        <button class="btn btn-primary" type="button" id="update-apply">Update Controller and Slaves now</button>
+        <button class="btn btn-ghost" type="button" id="update-close" hidden>Close</button>
       </div>
     </form>
   </dialog>

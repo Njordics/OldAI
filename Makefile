@@ -1,10 +1,10 @@
 GO       ?= go
-VERSION  ?= 0.2.0-dev
+VERSION  ?= 0.3.0-dev
 BIN      := bin/linux-amd64
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 GOBUILD  := CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)"
 
-.PHONY: all build test vet clean controller-iso slave-iso isos
+.PHONY: all build test vet clean controller-iso slave-iso isos update-bundle
 
 all: vet test build
 
@@ -29,3 +29,7 @@ controller-iso slave-iso: build
 	VERSION=$(VERSION) bash iso/build.sh $(@:-iso=)
 
 isos: controller-iso slave-iso
+
+# In-place update bundle (docs/protocol.md §13); CI publishes it per branch.
+update-bundle: build
+	VERSION=$(VERSION) bash scripts/update-bundle.sh

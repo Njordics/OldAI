@@ -1,0 +1,10 @@
+[Unit]
+Description=Install an AI Cluster update
+Documentation=https://github.com/Njordics/OldAI/blob/main/docs/protocol.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/aicluster/apply-update
+# Download is done; installing, restarting and the health check take a few
+# minutes at most.
+TimeoutStartSec=15min

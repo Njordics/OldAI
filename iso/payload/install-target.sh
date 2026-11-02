@@ -3,6 +3,8 @@
 # the unattended install. Installs the AI Cluster payload for one role.
 # Idempotent: running it again on an installed system just refreshes files.
 set -euo pipefail
+# Name the failing command in the installer log instead of exiting silently.
+trap 'echo "aicluster-install: FAILED at line $LINENO (exit $?): $BASH_COMMAND" >&2' ERR
 
 role=${1:?usage: install-target.sh controller|slave}
 src=$(cd "$(dirname "$0")" && pwd)
@@ -12,7 +14,12 @@ case "$role" in controller|slave) ;; *) echo "unknown role $role" >&2; exit 2 ;;
 
 install -d -m 0755 /etc/aicluster /usr/lib/aicluster /etc/issue.d
 echo "$role" >/etc/aicluster/role
+# Update bundles leave the runtimes alone, so keep the old components line.
+components=$(grep '^components ' /etc/aicluster/build-info 2>/dev/null || true)
 cp "$src/BUILD" /etc/aicluster/build-info
+if [ -n "$components" ] && ! grep -q '^components ' /etc/aicluster/build-info; then
+	echo "$components" >>/etc/aicluster/build-info
+fi
 
 # Hostname: one Controller per cluster, Slaves get a stable unique suffix.
 if [ "$role" = controller ]; then
@@ -29,7 +36,11 @@ fi
 
 install -m 0755 "$src/console-status" /usr/lib/aicluster/console-status
 install -m 0644 "$src/systemd/aicluster-console.service" "$src/systemd/aicluster-console.timer" /etc/systemd/system/
-units=(aicluster-console.timer)
+# In-place updates: the daemons stage a bundle in /var/lib/aicluster/update
+# and this root-owned updater installs it (docs/protocol.md §13).
+install -m 0755 "$src/apply-update" /usr/lib/aicluster/apply-update
+install -m 0644 "$src/systemd/aicluster-update.path" "$src/systemd/aicluster-update.service" /etc/systemd/system/
+units=(aicluster-console.timer aicluster-update.path)
 
 case "$role" in
 controller)
@@ -41,6 +52,7 @@ controller)
 	cp -r "$src/provisioner/aicluster_provisioner" /usr/lib/aicluster/provisioner/
 	cp -r "$src/catalog" /usr/share/aicluster/catalog
 	install -d -o aicluster -g aicluster -m 0750 /var/lib/aicluster /var/lib/aicluster/controller
+	install -d -o aicluster -g aicluster -m 0755 /var/lib/aicluster/update
 	sed 's/0750 root root/0750 aicluster aicluster/' "$src/systemd/aicluster.tmpfiles" >/etc/tmpfiles.d/aicluster.conf
 	install -m 0644 "$src/systemd/aiclusterd.service" "$src/systemd/aicluster-provisioner.service" /etc/systemd/system/
 	# Slaves move to the Controller's own subnet after adoption (docs/iso.md).
@@ -53,7 +65,7 @@ controller)
 slave)
 	install -m 0755 "$src/bin/aicluster-agent" /usr/bin/
 	id -u ollama >/dev/null 2>&1 || useradd --system --home-dir /var/lib/aicluster/models/ollama --no-create-home --shell /usr/sbin/nologin ollama
-	install -d -m 0755 /var/lib/aicluster /var/lib/aicluster/models
+	install -d -m 0755 /var/lib/aicluster /var/lib/aicluster/models /var/lib/aicluster/update
 	install -d -o ollama -g ollama -m 0755 /var/lib/aicluster/models/ollama
 	install -m 0644 "$src/systemd/aicluster.tmpfiles" /etc/tmpfiles.d/aicluster.conf
 
@@ -63,18 +75,23 @@ slave)
 		tar -C /usr -xzf "$src/runtime/ollama-linux-amd64.tgz"
 		install -m 0644 "$src/systemd/ollama.service" /etc/systemd/system/
 		units+=(ollama.service)
+	elif [ -x /usr/bin/ollama ]; then
+		log "keeping the installed Ollama"
 	else
 		log "no Ollama in this image; the node will report its runtime as unavailable"
 	fi
 
 	if [ -d "$src/runtime/llama.cpp" ]; then
+		# Optional: without it the node works, only pooled models don't.
 		log "installing llama.cpp (pooled models)"
-		rm -rf /usr/lib/aicluster/llama.cpp
-		cp -r "$src/runtime/llama.cpp" /usr/lib/aicluster/llama.cpp
-		chmod 0755 /usr/lib/aicluster/llama.cpp/*-server
-		missing=$(LD_LIBRARY_PATH=/usr/lib/aicluster/llama.cpp ldd /usr/lib/aicluster/llama.cpp/llama-server | awk '/not found/ {print $1}')
-		if [ -n "$missing" ]; then
-			log "llama.cpp needs libraries not in the image: $missing (pooled models will fail until they are installed)"
+		lc=/usr/lib/aicluster/llama.cpp
+		if rm -rf "$lc" && cp -r "$src/runtime/llama.cpp" "$lc" && chmod 0755 "$lc"/*-server; then
+			missing=$(LD_LIBRARY_PATH=$lc ldd "$lc/llama-server" 2>&1 | awk '/not found/ {print $1}') || missing="(ldd failed)"
+			if [ -n "$missing" ]; then
+				log "WARNING: llama.cpp is missing libraries: $missing; pooled models won't work on this node"
+			fi
+		else
+			log "WARNING: llama.cpp could not be installed; pooled models won't work on this node"
 		fi
 	fi
 

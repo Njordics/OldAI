@@ -594,6 +594,23 @@ function wire() {
     }
   });
 
+  $("#rotate-code").addEventListener("click", async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const r = await api("POST", "/api/v1/settings/login-code");
+      const out = $("#new-code");
+      out.textContent = `New code: ${r.login_code}`;
+      out.hidden = false;
+      toast("New login code issued; the old one no longer works");
+    } catch (ex) {
+      if (ex instanceof AuthError) return showLogin();
+      toast(ex.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   $("#logout").addEventListener("click", async () => {
     try { await api("DELETE", "/session"); } catch { /* signing out anyway */ }
     showLogin();

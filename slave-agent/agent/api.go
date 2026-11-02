@@ -138,6 +138,7 @@ func (a *Agent) observed() *proto.ObservedState {
 	if a.rt != nil {
 		versions["runtime"] = a.rt.Kind()
 	}
+	update := a.updateVersions(versions)
 	return &proto.ObservedState{
 		ObservedGeneration: a.desired.Generation,
 		Phase:              phase,
@@ -145,6 +146,7 @@ func (a *Agent) observed() *proto.ObservedState {
 		Versions:           versions,
 		Models:             models,
 		Network:            a.observedNetworkLocked(),
+		Update:             update,
 	}
 }
 

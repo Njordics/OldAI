@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/hex"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"aicluster/common/httpx"
 	"aicluster/common/proto"
+	"aicluster/controller/core"
 )
 
 //go:embed ui
@@ -78,23 +80,63 @@ func (s *Server) auth(next http.Handler) http.Handler {
 }
 
 type loginRequest struct {
+	// Token is the login code shown on the Controller's console
+	// ("K7QM-4XPA"), or the full admin token.
 	Token string `json:"token"`
+}
+
+// codeOK checks a typed login code against the current one.
+func (s *Server) codeOK(typed string) bool {
+	want := s.core.LoginCode()
+	return want != "" && subtle.ConstantTimeCompare([]byte(core.NormalizeLoginCode(typed)), []byte(want)) == 1
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if err := httpx.ReadJSON(r, &req); err != nil || !s.tokenOK(strings.TrimSpace(req.Token)) {
-		time.Sleep(500 * time.Millisecond) // slow down guessing
-		s.log.Warn("dashboard sign-in failed", "remote", r.RemoteAddr)
-		httpx.WriteError(w, http.StatusUnauthorized, proto.ErrForbidden, "wrong admin token")
+	_ = httpx.ReadJSON(r, &req)
+	typed := strings.TrimSpace(req.Token)
+	addr, _, _ := net.SplitHostPort(r.RemoteAddr)
+	isCode := len(typed) < 32 // anything shorter can't be the full token
+	if wait := s.limiter.allow(addr, isCode); wait > 0 {
+		s.log.Warn("dashboard sign-in throttled", "remote", addr, "retry_in", wait.Round(time.Second))
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		httpx.WriteError(w, http.StatusTooManyRequests, proto.ErrForbidden,
+			"too many wrong attempts; try again in "+humanWait(wait))
 		return
 	}
+	if !(isCode && s.codeOK(typed)) && !(!isCode && s.tokenOK(typed)) {
+		s.limiter.failed(addr, isCode)
+		time.Sleep(500 * time.Millisecond) // slow down guessing
+		s.log.Warn("dashboard sign-in failed", "remote", addr)
+		httpx.WriteError(w, http.StatusUnauthorized, proto.ErrForbidden, "wrong login code")
+		return
+	}
+	s.limiter.succeeded(addr)
 	exp := time.Now().Add(sessionTTL)
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: s.sessionValue(exp), Path: "/", Expires: exp,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
 	httpx.WriteJSON(w, http.StatusOK, proto.OK{V: proto.Version, OK: true})
+}
+
+func humanWait(d time.Duration) string {
+	if d < time.Minute {
+		return strconv.Itoa(int(d.Seconds())+1) + " seconds"
+	}
+	return strconv.Itoa(int(d.Minutes())+1) + " minutes"
+}
+
+// rotateLoginCode issues a new login code; the console shows it within
+// seconds. Signed-in dashboards stay signed in.
+func (s *Server) rotateLoginCode(w http.ResponseWriter, r *http.Request) {
+	code, err := s.core.RotateLoginCode()
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, proto.ErrInternal, err.Error())
+		return
+	}
+	s.log.Info("login code rotated", "remote", r.RemoteAddr)
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"login_code": core.FormatLoginCode(code)})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

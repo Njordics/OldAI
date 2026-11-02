@@ -141,7 +141,7 @@ for b in "${bins[@]}"; do
 	[ -f "$bin/$b" ] || die "$bin/$b missing; run 'make build' first"
 	install -m 0755 "$bin/$b" "$stage/aicluster/bin/$b"
 done
-install -m 0755 iso/payload/install-target.sh iso/payload/console-status iso/payload/wipe-disks.sh "$stage/aicluster/"
+install -m 0755 iso/payload/install-target.sh iso/payload/console-status iso/payload/wipe-disks.sh iso/payload/apply-update "$stage/aicluster/"
 cp iso/payload/systemd/* "$stage/aicluster/systemd/"
 
 components="ubuntu=$base_name"
@@ -231,6 +231,15 @@ awk -v role="$role" -v ssh="$ssh_server" -v lock="$lock" -v passwd="$passwd" -v 
 sed -e "s|@TIMEOUT@|${GRUB_TIMEOUT:-10}|" -e "s|@TITLE@|$title|" -e "s|@KERNEL_ARGS@|${KERNEL_ARGS:-}|" \
 	iso/grub.cfg.in >"$work/grub.cfg"
 
+# The installer's media check (casper-md5check) compares files with
+# /md5sum.txt; record the new grub.cfg so the check passes.
+xorriso -osirrox on -indev "$base" -extract /md5sum.txt "$work/md5sum.txt" >/dev/null 2>&1 ||
+	die "cannot read /md5sum.txt from $base_name"
+chmod u+w "$work/md5sum.txt"
+sum=$(md5sum "$work/grub.cfg" | cut -d' ' -f1)
+sed -i "s|^[0-9a-f]\{32\}  \./boot/grub/grub\.cfg\$|$sum  ./boot/grub/grub.cfg|" "$work/md5sum.txt"
+grep -q "^$sum  \./boot/grub/grub\.cfg\$" "$work/md5sum.txt" || die "md5sum.txt has no ./boot/grub/grub.cfg entry"
+
 # ---- remaster -----------------------------------------------------------------
 out=$out_dir/aicluster-$role-$version.iso
 rm -f "$out"
@@ -240,6 +249,7 @@ xorriso -report_about WARNING \
 	-map "$stage/aicluster" /aicluster \
 	-map "$work/autoinstall.yaml" /autoinstall.yaml \
 	-map "$work/grub.cfg" /boot/grub/grub.cfg \
+	-map "$work/md5sum.txt" /md5sum.txt \
 	-boot_image any replay \
 	-padding included
 (cd "$out_dir" && sha256sum "$(basename "$out")" >"$(basename "$out").sha256")

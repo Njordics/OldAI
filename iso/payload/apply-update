@@ -1,0 +1,117 @@
+#!/bin/bash
+# Installs an update bundle that aiclusterd or aicluster-agent has verified
+# and unpacked, then restarts the service. If it doesn't stay up, puts the
+# previous files back. Started as root by aicluster-update.path when the
+# daemon writes $dir/request; the verdict goes to $dir/result.json, which
+# the restarted daemon reports (docs/protocol.md §13).
+set -uo pipefail
+# The whole script is one block, so bash has read all of it before the
+# install replaces this file.
+{
+dir=/var/lib/aicluster/update
+req=$dir/request
+staged=$dir/staged/aicluster
+backup=$dir/previous
+log() { echo "aicluster-update: $*"; }
+
+[ -f "$req" ] || exit 0
+commit=$(sed -n 's/.*"commit" *: *"\([0-9a-f]\{7,64\}\)".*/\1/p' "$req")
+rm -f "$req"
+role=$(cat /etc/aicluster/role 2>/dev/null)
+
+result() { # ok error
+	local err=${2//\\/\\\\}
+	err=${err//\"/\\\"}
+	printf '{"commit":"%s","ok":%s,"error":"%s","at":"%s"}\n' "$commit" "$1" "$err" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$dir/result.json.tmp"
+	chmod 0644 "$dir/result.json.tmp"
+	mv -f "$dir/result.json.tmp" "$dir/result.json"
+}
+
+case "$role" in
+controller)
+	services=(aicluster-provisioner aiclusterd)
+	main=aiclusterd
+	files=(/usr/bin/aiclusterd /usr/bin/aicluster /usr/lib/aicluster/provisioner /usr/share/aicluster/catalog)
+	;;
+slave)
+	services=(aicluster-agent)
+	main=aicluster-agent
+	files=(/usr/bin/aicluster-agent)
+	;;
+*)
+	log "unknown role '$role'"
+	result false "unknown role '$role'"
+	exit 1
+	;;
+esac
+files+=(/usr/lib/aicluster/console-status /usr/lib/aicluster/apply-update /etc/aicluster/build-info /etc/tmpfiles.d/aicluster.conf)
+for f in /etc/systemd/system/aicluster-*; do files+=("$f"); done
+[ "$role" = controller ] && files+=(/etc/systemd/system/aiclusterd.service)
+
+if [ -z "$commit" ] || [ ! -f "$staged/manifest.json" ] || ! grep -q "\"commit\" *: *\"$commit" "$staged/manifest.json"; then
+	log "staged bundle doesn't match the request ($commit)"
+	result false "the staged bundle doesn't match the requested commit"
+	exit 1
+fi
+
+# stays_up: the service is active and hasn't restarted for 20 s, within 90 s.
+stays_up() {
+	local svc=$1 deadline=$((SECONDS + 90)) since=-1 restarts
+	restarts=$(systemctl show -p NRestarts --value "$svc")
+	while [ $SECONDS -lt $deadline ]; do
+		if systemctl is-active --quiet "$svc" && [ "$(systemctl show -p NRestarts --value "$svc")" = "$restarts" ]; then
+			[ $since -lt 0 ] && since=$SECONDS
+			[ $((SECONDS - since)) -ge 20 ] && return 0
+		else
+			since=-1
+			restarts=$(systemctl show -p NRestarts --value "$svc")
+		fi
+		sleep 2
+	done
+	return 1
+}
+
+log "installing $commit on this $role"
+rm -rf "$backup"
+mkdir -p "$backup"
+existing=()
+for f in "${files[@]}"; do [ -e "$f" ] && existing+=("${f#/}"); done
+tar -C / -cf "$backup/files.tar" "${existing[@]}" || { result false "couldn't back up the current files"; exit 1; }
+
+# The Controller's database may be migrated by the new version: keep a
+# consistent copy, taken while it is stopped.
+systemctl stop "$main"
+if [ "$role" = controller ]; then
+	db=/var/lib/aicluster/controller/aicluster.db
+	for f in "$db" "$db-wal" "$db-shm"; do [ -f "$f" ] && cp -p "$f" "$backup/"; done
+fi
+
+err=""
+if ! bash "$staged/install-target.sh" "$role" >"$dir/install.log" 2>&1; then
+	err="install script failed: $(grep -m1 'FAILED at' "$dir/install.log" || tail -n1 "$dir/install.log")"
+fi
+if [ -z "$err" ]; then
+	systemctl daemon-reload
+	systemctl restart "${services[@]}"
+	stays_up "$main" || err="$main didn't stay up on the new version"
+fi
+if [ -z "$err" ]; then
+	log "updated to $commit"
+	result true ""
+	rm -rf "$dir/staged"
+	exit 0
+fi
+
+log "update failed: $err; rolling back"
+systemctl stop "$main"
+[ "$role" = controller ] && rm -rf /usr/lib/aicluster/provisioner /usr/share/aicluster/catalog
+tar -C / -xf "$backup/files.tar"
+if [ "$role" = controller ]; then
+	rm -f "$db-wal" "$db-shm"
+	for f in "$backup"/aicluster.db*; do [ -f "$f" ] && cp -p "$f" /var/lib/aicluster/controller/; done
+fi
+result false "$err; rolled back to the previous version"
+systemctl daemon-reload
+systemctl restart "${services[@]}"
+exit 1
+}

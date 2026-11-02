@@ -11,9 +11,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 
+	"aicluster/common/selfupdate"
 	"aicluster/slave-agent/agent"
 )
 
@@ -47,6 +49,7 @@ func main() {
 	fs.IntVar(&cfg.InferenceSlots, "inference-slots", 4, "requests the runtime serves at once (match OLLAMA_NUM_PARALLEL)")
 	fs.StringVar(&cfg.LlamaCppDir, "llamacpp-dir", "/usr/lib/aicluster/llama.cpp", "directory with llama.cpp's ggml-rpc-server and llama-server (pooled models)")
 	fs.BoolVar(&cfg.ManageNetwork, "manage-network", true, "move this node onto the Controller's Slave network when asked (Linux, systemd-networkd)")
+	updateDir := fs.String("update-dir", selfupdate.DefaultDir, "where update bundles are staged for the root updater (empty: this node can't update itself)")
 	var fakeMBps int64
 	fs.Int64Var(&fakeMBps, "fake-mbps", 0, "throttle the fake runtime's pulls (MB/s, 0 = unlimited)")
 	_ = fs.Parse(args)
@@ -54,6 +57,9 @@ func main() {
 		cfg.BeaconTargets = strings.Split(beaconTargets, ",")
 	}
 	cfg.FakeBytesPerSec = fakeMBps << 20
+	if *updateDir != "" && runtime.GOOS == "linux" {
+		cfg.Installer = selfupdate.FileInstaller{Path: *updateDir}
+	}
 	if err := os.MkdirAll(cfg.ModelDir, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

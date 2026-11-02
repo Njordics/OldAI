@@ -97,3 +97,53 @@ func TestDashboardSession(t *testing.T) {
 		t.Fatalf("bearer PUT: %d", r.StatusCode)
 	}
 }
+
+// The console shows a short login code ("K7QM-4XPA") for the dashboard;
+// guessing it is throttled, and rotating it takes effect at once.
+func TestDashboardLoginCode(t *testing.T) {
+	c := startController(t, core.ModeAuto)
+	srv := httptest.NewTLSServer(web.New(c.Core, logger("web")).Handler())
+	defer srv.Close()
+	login := func(code string) *http.Response {
+		r, err := srv.Client().Post(srv.URL+"/session", "application/json", strings.NewReader(`{"token":"`+code+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		return r
+	}
+	code := c.LoginCode()
+	if len(code) != 8 {
+		t.Fatalf("login code %q", code)
+	}
+	// Formatted, or as typed in lower case without the dash: both work.
+	if r := login(core.FormatLoginCode(code)); r.StatusCode != 200 || len(r.Cookies()) != 1 {
+		t.Fatalf("formatted code: %d", r.StatusCode)
+	}
+	if r := login(strings.ToLower(code)); r.StatusCode != 200 {
+		t.Fatalf("lower-case code: %d", r.StatusCode)
+	}
+
+	// Rotating replaces the code; the old one stops working.
+	r, _ := http.NewRequest("POST", srv.URL+"/api/v1/settings/login-code", nil)
+	r.Header.Set("Authorization", "Bearer "+c.AdminToken)
+	resp, err := srv.Client().Do(r)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("rotate: %v %v", err, resp)
+	}
+	resp.Body.Close()
+	if c.LoginCode() == code {
+		t.Fatal("code not rotated")
+	}
+	if r := login(code); r.StatusCode != 401 {
+		t.Fatalf("old code after rotation: %d", r.StatusCode)
+	}
+
+	// 4 more wrong guesses (5 in all), then even the right code waits.
+	for range 4 {
+		login("AAAA-AAAA")
+	}
+	if r := login(core.FormatLoginCode(c.LoginCode())); r.StatusCode != http.StatusTooManyRequests || r.Header.Get("Retry-After") == "" {
+		t.Fatalf("after 5 wrong guesses: %d", r.StatusCode)
+	}
+}

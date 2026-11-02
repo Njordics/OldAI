@@ -8,6 +8,7 @@ import (
 
 	"aicluster/common/httpx"
 	"aicluster/common/proto"
+	"aicluster/controller/core"
 	"aicluster/controller/store"
 	"aicluster/controller/updates"
 )
@@ -46,6 +47,7 @@ func (s *Server) updateRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/v1/updates", s.getUpdates)
 	api.HandleFunc("POST /api/v1/updates/check", s.checkUpdates)
 	api.HandleFunc("POST /api/v1/updates/dismiss", s.dismissUpdate)
+	api.HandleFunc("POST /api/v1/updates/apply", s.applyUpdate)
 }
 
 type UpdateView struct {
@@ -53,11 +55,22 @@ type UpdateView struct {
 	// Dismissed is the newest commit the admin chose to skip; the pop-up
 	// stays hidden until something newer appears.
 	Dismissed string `json:"dismissed"`
+	// CanApply is true when "Update now" can install updates in place;
+	// otherwise ApplyBlocked says why.
+	CanApply     bool          `json:"can_apply"`
+	ApplyBlocked string        `json:"apply_blocked,omitempty"`
+	Rollout      *core.Rollout `json:"rollout,omitempty"`
 }
 
 func (s *Server) updateView(r *http.Request, st updates.Status) UpdateView {
 	d, _ := s.core.Store.Setting(r.Context(), "update_dismissed", "")
-	return UpdateView{Status: st, Dismissed: d}
+	v := UpdateView{Status: st, Dismissed: d, Rollout: s.core.Rollout()}
+	if err := s.core.CanSelfUpdate(); err != nil {
+		v.ApplyBlocked = err.Error()
+	} else {
+		v.CanApply = true
+	}
+	return v
 }
 
 func (s *Server) getUpdates(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +104,44 @@ func (s *Server) dismissUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, proto.OK{V: proto.Version, OK: true})
+}
+
+type applyRequest struct {
+	Commit string `json:"commit"`
+}
+
+// applyUpdate starts a rolling update to the newest commit on the branch:
+// the Controller first, then each Slave in turn (protocol §13).
+func (s *Server) applyUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.updates == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable, "updates_disabled", "update checks are not running")
+		return
+	}
+	var req applyRequest
+	if err := httpx.ReadJSON(r, &req); err != nil || req.Commit == "" {
+		httpx.WriteError(w, http.StatusBadRequest, proto.ErrBadRequest, "commit is required")
+		return
+	}
+	st := s.updates.Status()
+	if st.Latest == nil || st.Latest.SHA != req.Commit {
+		httpx.WriteError(w, http.StatusConflict, "stale_update", "that isn't the newest update any more; check again")
+		return
+	}
+	// Look the bundle up now, so a missing one is reported right away.
+	b, err := s.updates.FindBundle(r.Context(), req.Commit)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadGateway, "bundle_unavailable", err.Error())
+		return
+	}
+	fetch := func(ctx context.Context, commit, dir string) (string, error) {
+		return s.updates.Download(ctx, b, dir)
+	}
+	if err := s.core.StartUpdate(req.Commit, fetch); err != nil {
+		httpx.WriteError(w, http.StatusConflict, "update_not_started", err.Error())
+		return
+	}
+	s.log.Info("rolling update started from the dashboard", "commit", req.Commit)
+	httpx.WriteJSON(w, http.StatusAccepted, s.updateView(r, st))
 }
 
 // applyUpdateSettings handles the update fields of PUT /api/v1/settings.

@@ -21,6 +21,8 @@ Outbound: HTTPS to the configured upstreams (registry.ollama.ai, huggingface.co 
 
 Update check: one anonymous `GET` to `api.github.com` every 6 hours (branch head, plus a compare when it moved; ETag-cached). Nothing about the cluster is sent. Turn it off under Settings → Updates; offline mode also stops it.
 
+Pressing **Update** also fetches the release `update-<branch>` and its two assets from GitHub (protocol §13). Slaves download the bundle from the Controller's node API.
+
 ## Slave
 
 | Port | Proto | Service | Allowed from | Auth |

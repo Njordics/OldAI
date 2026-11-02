@@ -187,12 +187,14 @@ sequenceDiagram
 
 ### 6.5 Rolling updates
 
-Core rollout engine, per target (agent, runtime, OS packages):
-1. Pick next node, respecting `max_unavailable` (default 1) and never taking down the last healthy copy of a model unless `--force`.
-2. Mark `Draining` → gateway stops new requests, waits for in-flight (timeout 120 s).
-3. Bump desired state (new versions, `allow_reboot: true`).
-4. Wait for `observed_generation` and `Ready` (timeout → halt rollout, alert).
-5. Next node.
+The dashboard's Update button (protocol §13):
+1. **Controller first.** It downloads the CI-built bundle for the branch's newest commit and checks GitHub's SHA-256. A root-owned updater installs the bundle and restarts the Controller, rolling back if it doesn't stay up.
+2. **Then the Slaves, one at a time.** The restarted Controller puts the update in one node's desired state. That agent fetches the bundle from the Controller, checks it, and has the same updater install it.
+3. **Pacing.** The next node starts only after the current one heartbeats on the new commit, and the first failure stops the rollout.
+
+Not done yet:
+- draining a node's models before its agent restarts;
+- runtime and OS package updates.
 
 ## 7. Model provisioning engine (Python)
 

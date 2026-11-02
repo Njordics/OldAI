@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch for AI Cluster update requests
+
+[Path]
+# Written by aiclusterd or aicluster-agent once an update bundle is verified
+# and unpacked (docs/protocol.md §13).
+PathExists=/var/lib/aicluster/update/request
+Unit=aicluster-update.service
+
+[Install]
+WantedBy=multi-user.target

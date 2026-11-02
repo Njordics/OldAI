@@ -1,0 +1,49 @@
+# Builds the in-place update bundle for every push and publishes it on the
+# rolling pre-release "update-<branch>", where Controllers look for it
+# (docs/protocol.md §13). GitHub records each asset's SHA-256, which the
+# Controller checks before installing.
+name: Update bundle
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-bundle-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet and unit tests
+        run: |
+          go vet ./...
+          go test -count=1 $(go list ./... | grep -v /test/)
+      - name: Build bundle
+        run: make update-bundle
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="update-${GITHUB_REF_NAME//\//-}"
+          git tag -f "$tag" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$tag"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --prerelease --title "Update bundle: $GITHUB_REF_NAME" --notes "Installed by Controllers' Update button."
+          fi
+          # Bundle first: a Controller that sees the new manifest must find
+          # the matching bundle.
+          gh release upload "$tag" out/aicluster-update-linux-amd64.tar.gz --clobber
+          gh release upload "$tag" out/manifest.json --clobber
+          gh release edit "$tag" --notes "Built from $GITHUB_SHA. Installed by Controllers' Update button (docs/protocol.md §13)."

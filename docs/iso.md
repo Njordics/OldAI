@@ -70,10 +70,25 @@ The exact versions go into `/etc/aicluster/build-info` on the installed node.
 
 There is no SSH and no console login unless the image was built with `SSH_KEY_FILE` or `CONSOLE_PASSWORD`. The console shows a status screen above the login prompt instead, refreshed every 15 s:
 
-- **Controller:** dashboard URL, OpenAI API URL, the admin token, and the CA certificate's SHA-256 fingerprint. Anyone at the physical console can read the token, the same way anyone there could reinstall the machine. To replace it, delete `/var/lib/aicluster/controller/admin.token` and restart `aiclusterd`; a new one is generated.
+- **Controller:** dashboard URL, OpenAI API URL, the **login code** (`XXXX-XXXX`) for signing in to the dashboard, and the CA certificate's SHA-256 fingerprint.
+  - Anyone at the physical console can read the code, the same way anyone there could reinstall the machine. Settings → **New login code** replaces it.
+  - The long admin token for the CLI and API stays in `/var/lib/aicluster/controller/admin.token`. To replace it, delete that file and restart `aiclusterd`.
 - **Slave:** node ID, adoption status, and the pairing code when pairing is required.
 
 On a Slave, the console escape hatch `aicluster-agent factory-reset` needs a console login, so build with `CONSOLE_PASSWORD` if you want it.
+
+## Updating
+
+Use **Update Controller and Slaves now**, in Settings → Updates or in the pop-up that appears when an update is available.
+1. The Controller downloads the update that GitHub's CI built for the newest commit and checks it.
+2. It installs the update on itself and restarts. The dashboard reconnects on its own.
+3. It then updates the nodes one at a time.
+
+If anything doesn't come back on the new version, it is rolled back and the remaining nodes are left alone. Details: [protocol.md §13](protocol.md#13-in-place-updates).
+
+- **What's updated:** the Controller software, the provisioner, the model catalog and the node agent. Ollama and llama.cpp stay as installed.
+- **Older installs:** machines installed from an ISO older than this feature have no updater. Reinstall each one once from a current ISO; later updates come through the button. If you reinstall the Controller, release its Slaves first, or they won't trust the new one.
+- **During the update:** a node's models are unavailable for the few seconds its agent restarts.
 
 ## What the install sets up
 
@@ -86,7 +101,9 @@ On a Slave, the console escape hatch `aicluster-agent factory-reset` needs a con
 - **Slave:**
   - `ollama.service` runs as the `ollama` user, listens on loopback only, and keeps models in `/var/lib/aicluster/models/ollama`.
   - `aicluster-agent.service` runs as root, takes extra flags from `/etc/aicluster/agent.env` as `AGENT_ARGS=`, and expects llama.cpp in `/usr/lib/aicluster/llama.cpp`.
-- **Both:** `aicluster-console.timer` (the status screen) and `/etc/aicluster/role`.
+- **Both:**
+  - `aicluster-console.timer` (the status screen) and `/etc/aicluster/role`.
+  - The updater: when a daemon stages an update in `/var/lib/aicluster/update`, `aicluster-update.path` starts `/usr/lib/aicluster/apply-update` as root.
 
 `iso/payload/install-target.sh` does all of this and is safe to re-run.
 
@@ -112,6 +129,11 @@ QEMU/KVM inside WSL2 on an isolated bridge with DHCP, 6 GB RAM and 4 vCPUs per V
   - On a Slave: the only address is the Slave one, DNS is the Controller, and cluster names resolve while `example.com` is refused. The home router and the internet are unreachable.
   - A normal and a pooled model both served chats over the Slave network.
   - Releasing a Slave put it back on the home network.
+
+- **In-place updates:** a Controller and two Slaves were installed from ISOs of one commit, and later builds were served from a stand-in for GitHub's API.
+  - **Normal update:** the Controller installed the update, restarted on the new commit and waited for the updater's verdict, about 20 s. It then updated each Slave in turn, waiting for each one's verdict. The runtime versions in `build-info` were kept, and both Slaves stayed on the Slave network.
+  - **Broken Controller build** (an `aiclusterd` that exits at once): the updater restored the previous binaries and database. The Controller came back on the old commit and showed "rolled back" with the reason.
+  - **Broken agent build:** the first Slave rolled back to its previous agent and reported the failure. The rollout stopped without touching the second Slave.
 
 Not tested: physical hardware, booting from USB, GPUs, spinning disks (the non-discard wipe path), a home network that already uses `10.10.10.0/24`.
 

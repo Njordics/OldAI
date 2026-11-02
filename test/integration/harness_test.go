@@ -49,6 +49,7 @@ func freeUDP(t *testing.T) int {
 
 type ctrl struct {
 	*core.Core
+	cfg        core.Config
 	beaconAddr string
 	stop       func()
 }
@@ -87,7 +88,7 @@ func startController(t *testing.T, mode string, opts ...func(*core.Config)) *ctr
 	}()
 	stop := func() { cancel(); <-done; c.Close() }
 	t.Cleanup(stop)
-	return &ctrl{Core: c, beaconAddr: beacon, stop: stop}
+	return &ctrl{Core: c, cfg: cfg, beaconAddr: beacon, stop: stop}
 }
 
 type slave struct {

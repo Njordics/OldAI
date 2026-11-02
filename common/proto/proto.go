@@ -181,6 +181,33 @@ type DesiredState struct {
 	// Network moves the node onto the Controller's own subnet (protocol §12).
 	// Absent: the node stays on whatever network it booted on.
 	Network *SlaveNetwork `json:"network,omitempty"`
+	// Update asks the agent to install a newer build of itself (§13). The
+	// Controller sets it on one node at a time during a rolling update.
+	Update *AgentUpdate `json:"update,omitempty"`
+}
+
+// AgentUpdate points at the update bundle the Controller serves on its node
+// API. The agent verifies SHA256 before installing anything.
+type AgentUpdate struct {
+	Commit string `json:"commit"`
+	Path   string `json:"path"` // on the node API, e.g. /v1/update/bundle
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
+}
+
+// Agent update states in ObservedUpdate.State.
+const (
+	UpdateDownloading = "downloading"
+	UpdateInstalling  = "installing"
+	UpdateVerifying   = "verifying" // running the new build; the updater is checking it stays up
+	UpdateFailed      = "failed"
+)
+
+// ObservedUpdate reports the agent's progress with DesiredState.Update.
+type ObservedUpdate struct {
+	Commit string `json:"commit"`
+	State  string `json:"state"`
+	Error  string `json:"error,omitempty"`
 }
 
 // SlaveNetwork is the Controller's subnet for Slaves, on the same wire as
@@ -308,7 +335,17 @@ type ObservedState struct {
 	Versions           map[string]string `json:"versions"`
 	Models             []ObservedModel   `json:"models"`
 	Network            *ObservedNetwork  `json:"network,omitempty"`
+	Update             *ObservedUpdate   `json:"update,omitempty"`
 }
+
+// Versions keys besides "agent", "kernel", "os" and "runtime".
+const (
+	// VersionAgentCommit is the git commit of the running agent.
+	VersionAgentCommit = "agent_commit"
+	// VersionSelfUpdate is "yes" when the node can install updates, else
+	// why not. Older agents don't report it and can't.
+	VersionSelfUpdate = "self_update"
+)
 
 const (
 	PhaseProvisioning = "provisioning"

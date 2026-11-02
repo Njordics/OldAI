@@ -25,6 +25,7 @@ import (
 	"aicluster/common/discovery"
 	"aicluster/common/pki"
 	"aicluster/common/proto"
+	"aicluster/common/selfupdate"
 	"aicluster/controller/modelcache"
 	"aicluster/controller/provision"
 	"aicluster/controller/slavenet"
@@ -70,6 +71,10 @@ type Config struct {
 	SlaveNet string
 	// SlaveIface carries the Slave network (default: the default-route interface).
 	SlaveIface string
+	// BuildCommit is the commit this Controller runs (default: the binary's
+	// VCS stamp). Installer installs updates; nil means it can't (§13).
+	BuildCommit string
+	Installer   selfupdate.Installer
 }
 
 func (c *Config) defaults() {
@@ -106,6 +111,9 @@ func (c *Config) defaults() {
 	if c.ModelGCGrace == 0 {
 		c.ModelGCGrace = 24 * time.Hour
 	}
+	if c.BuildCommit == "" {
+		c.BuildCommit = selfupdate.BuildCommit()
+	}
 }
 
 type Core struct {
@@ -117,6 +125,7 @@ type Core struct {
 	CA         *pki.CA
 	cert       tls.Certificate
 	AdminToken string
+	loginCode  string // dashboard login code; see logincode.go
 
 	nodeLn    net.Listener
 	endpoints []string
@@ -130,6 +139,9 @@ type Core struct {
 	nameMu   sync.Mutex         // serialises node-name allocation
 	inflight map[string]bool    // node IDs with an adoption or probe running
 	backoff  map[string]backoff // auto-adoption retry schedule
+	roll     rolloutState       // in-place update; see rollout.go
+
+	runCtx context.Context // Run's context, for work started by API calls
 }
 
 type backoff struct {
@@ -146,7 +158,7 @@ func New(cfg Config, log *slog.Logger) (*Core, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Core{cfg: cfg, log: log, Store: st, inflight: map[string]bool{}, backoff: map[string]backoff{}}
+	c := &Core{cfg: cfg, log: log, Store: st, inflight: map[string]bool{}, backoff: map[string]backoff{}, runCtx: context.Background()}
 	ctx := context.Background()
 
 	if c.ClusterID, err = st.Setting(ctx, "cluster_id", ""); err != nil {
@@ -176,6 +188,9 @@ func New(cfg Config, log *slog.Logger) (*Core, error) {
 		return nil, fmt.Errorf("pki: %w", err)
 	}
 	if err := c.loadAdminToken(); err != nil {
+		return nil, err
+	}
+	if err := c.loadLoginCode(); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -321,7 +336,13 @@ func (c *Core) Run(ctx context.Context) error {
 		}
 	}
 	c.log.Info("controller core starting", "cluster_id", c.ClusterID, "mode", c.Mode(), "endpoints", c.endpoints)
+	c.mu.Lock()
+	c.runCtx = ctx
+	c.mu.Unlock()
 	c.ensureAssignedCached(ctx)
+	if c.cfg.Installer != nil {
+		c.resumeRollout(ctx)
+	}
 	if c.slaveNet != nil {
 		c.serveSlaveNet(ctx)
 	}
