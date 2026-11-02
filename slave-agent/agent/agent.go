@@ -55,6 +55,9 @@ type Config struct {
 	// inference) or "none".
 	Runtime   string
 	OllamaURL string
+	// OllamaModels is Ollama's OLLAMA_MODELS directory (default
+	// ModelDir/ollama); other nodes copy model files from its blobs.
+	OllamaModels string
 	// FakeBytesPerSec slows the fake runtime's pulls so progress is visible.
 	FakeBytesPerSec int64
 	// RegistryShimListen is the loopback address the runtime pulls from.
@@ -111,6 +114,9 @@ func (c *Config) defaults() {
 	}
 	if c.OllamaURL == "" {
 		c.OllamaURL = "http://127.0.0.1:11434"
+	}
+	if c.OllamaModels == "" {
+		c.OllamaModels = filepath.Join(c.ModelDir, "ollama")
 	}
 	if c.RegistryShimListen == "" {
 		c.RegistryShimListen = "127.0.0.1:7452"
@@ -171,6 +177,7 @@ type Agent struct {
 	upd   updState
 	drv   drvState
 	therm thermState
+	peers peerState
 }
 
 func New(cfg Config, log *slog.Logger) (*Agent, error) {

@@ -41,6 +41,8 @@ func (c *Core) serveNodeAPI(ctx context.Context) error {
 	mux.Handle("GET /v2/", c.anyNode(c.Models))
 	// The update bundle being rolled out (§13).
 	mux.Handle("GET "+bundlePath, c.anyNode(http.HandlerFunc(c.serveBundle)))
+	// Where to download a model file from: a peer or the Controller (§16).
+	mux.Handle("GET /v1/nodes/{id}/blob-source/{digest}", c.nodeOnly(c.handleBlobSource))
 	// Ubuntu's archive, for GPU drivers (§14).
 	mux.Handle("GET "+aptPath+"/", c.anyNode(c.serveApt()))
 

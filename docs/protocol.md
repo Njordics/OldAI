@@ -415,6 +415,7 @@ Quant preference order (best first): `bf16/fp16 > q8_0 > q6_K > q5_K_M > awq/gpt
 | `GET /v2/…` | OCI distribution API (read-only) — pull-through cache of `registry.ollama.ai`, used by the Slave's loopback shim |
 | `GET /v1/update/bundle` | the update bundle being rolled out (§13); any adopted node |
 | `GET /blobs/{path}` | GGUF / safetensors / wheel files from the model cache; supports `Range`; response header `X-Content-SHA256` |
+| `GET /v1/nodes/{id}/blob-source/{digest}` | where to download a model file from: `{node_id, endpoint}` of a peer, or `{}` for the Controller (§16); `?failed=<node_id>` reports a peer that failed |
 | `GET /apt/ubuntu/{…}` | the Controller's copy of Ubuntu's archive, for GPU drivers (§14); any adopted node |
 | `GET /repo/{…}` | signed aicluster apt repo (agent, runtimes, whisper) |
 
@@ -652,3 +653,33 @@ NVIDIA cards' own fans stay under the card's control.
 - **Automated tests:** sensor readings from a fake `/sys` tree reach the Controller. `boost` takes over a fan at the expected duty, never below the firmware's, and at full speed when hot. Switching back, stopping the agent and restoring from the saved file all return the fan to the firmware.
 - **Test VM:** a VM has no sensors. Its node reported `no fans are visible to the operating system`, `boost` changed nothing, and `fans-restore` ran cleanly on every stop.
 - **Not tested:** real sensors and fans.
+
+## 16. 1 Gb networks: peer copying and link checks
+
+Nodes are expected on 1 Gb copper, which moves about 110 MB/s. Answers barely touch the network: a reply streams a few KB, and a pooled model passes about 32 KB per word between members. Moving model files is what takes time, 45 s for a 7B model and 6 minutes for a 70B one, and every node used to fetch them through the Controller's single port.
+
+**Peer copying.** A node that has a model file serves it to other nodes, so copies don't all queue on the Controller's port.
+- **Serving:** agents serve complete files from the runtime's blob store at `GET /v2/blobs/{digest}` on `:7450`, with `Range`, only to clients with a node certificate of this cluster. They report `versions.peer_blobs = "yes"`.
+- **Asking:** before each blob request, the registry shim asks the Controller `GET /v1/nodes/{id}/blob-source/{digest}`.
+- **Choosing a source** (Controller): it looks for online nodes that report the model as installed or loaded, whose manifest contains the file, and that aren't avoided for this file. It picks the one with the fewest downloads in progress, if under `--peer-uploads` (default 2); otherwise the Controller. Files under 64 MiB always come from the Controller.
+- **Leases:** a one-minute lease, renewed by every request, keeps all of a runtime's ranged requests for one file on one source. Ollama fetches large files in 100 MB parts.
+- **Fetching** (shim): it streams from the peer, authenticating it by its node certificate. If the peer can't be reached or answers with an error, it falls back to the Controller for that request. It also tells the Controller (`?failed=`), which avoids that peer for the file for 10 minutes.
+- **Integrity:** the runtime checks every file's SHA-256, so a peer can't substitute anything.
+- **Older agents** neither ask nor serve, and keep downloading from the Controller.
+
+**Link checks.**
+- **Reporting:** every heartbeat's `health.link` is the interface towards the Controller, from `/sys/class/net/<iface>/{speed,duplex,wireless}`: `{iface, mbps, duplex, wireless}`.
+- **Warnings:** the dashboard flags links under 1000 Mb/s, at half duplex, or over Wi-Fi, in the node list and the node's details. A copper cable with a damaged pair commonly links at 100 Mb/s without any other symptom.
+- **Controller:** Settings → Cluster shows the Controller's own link (the Slave network's interface, else the default route's).
+- **Unknown speed:** virtual network cards report none; that shows as "speed unknown", with no warning.
+
+**Speed test.** `POST /api/v1/nodes/{id}/nettest` moves 128 MiB each way over the node API's mTLS connection:
+- `POST /v1/nettest` on the agent receives and drops a body (to the node);
+- `GET /v1/nettest?bytes=` sends one (from the node).
+
+It returns `{to_node_mbps, from_node_mbps, bytes, at, error}`, which the node details show. Only one test runs at a time. A result well below the link speed points at the cable, the switch, or other traffic.
+
+**Tested:**
+- **Automated tests:** a second node copied a model from the first. A third node, sent to two nodes that had just stopped, fell back to the Controller and still got a verified copy. Speed tests over loopback measured 3.5–4 Gb/s, so TLS doesn't limit a 1 Gb link.
+- **Test VMs with real Ollama:** the second Slave's Ollama fetched a 531 MB model file in six 100 MB parts, all from the first Slave, in about a second.
+- **Not tested:** physical 1 Gb links and switches.

@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,10 @@ func (a *Agent) routes() http.Handler {
 	mux.Handle("GET /v1/jobs/{id}", a.controllerOnly(a.handleJob))
 	mux.Handle("/v1/infer/", a.controllerOnly(a.handleInfer))
 	mux.HandleFunc("GET /v1/rpc-tunnel/{group}", a.handleRPCTunnel)
+	// Other nodes copy model files from this one (§16).
+	mux.Handle("GET /v2/blobs/{digest}", a.nodeOnly(a.handlePeerBlob))
+	mux.Handle("GET /v1/nettest", a.controllerOnly(a.handleNetTestSend))
+	mux.Handle("POST /v1/nettest", a.controllerOnly(a.handleNetTestReceive))
 	return mux
 }
 
@@ -139,6 +144,9 @@ func (a *Agent) observed() *proto.ObservedState {
 		versions["runtime"] = a.rt.Kind()
 	}
 	update := a.updateVersions(versions)
+	if a.blobFile("sha256:"+strings.Repeat("0", 64)) != "" {
+		versions[proto.VersionPeerBlobs] = "yes"
+	}
 	return &proto.ObservedState{
 		ObservedGeneration: a.desired.Generation,
 		Phase:              phase,

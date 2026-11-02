@@ -42,6 +42,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/v1/nodes/{id}", s.getNode)
 	api.HandleFunc("POST /api/v1/nodes/{id}/adopt", s.adopt)
 	api.HandleFunc("POST /api/v1/nodes/{id}/release", s.release)
+	api.HandleFunc("POST /api/v1/nodes/{id}/nettest", s.netTest)
 	api.HandleFunc("GET /api/v1/settings", s.getSettings)
 	api.HandleFunc("PUT /api/v1/settings", s.putSettings)
 	api.HandleFunc("POST /api/v1/settings/login-code", s.rotateLoginCode)
@@ -133,6 +134,8 @@ type ClusterInfo struct {
 	IntegratedGPUs bool `json:"integrated_gpus"`
 	// Fans: "firmware" or "boost" (§15).
 	Fans string `json:"fans"`
+	// ControllerLink is the Controller's own link towards its Slaves (§16).
+	ControllerLink *proto.Link `json:"controller_link,omitempty"`
 }
 
 // SlaveNetInfo describes the Controller's own subnet for Slaves (§12).
@@ -154,6 +157,7 @@ func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {
 
 		IntegratedGPUs: s.core.UseIntegratedGPUs(r.Context()),
 		Fans:           s.core.FanMode(r.Context()),
+		ControllerLink: s.core.ControllerLink(),
 	}
 	if n := s.core.SlaveNet(); n != nil {
 		info.SlaveNet = &SlaveNetInfo{Subnet: n.Subnet.String(), ControllerIP: n.ControllerIP.String(), Iface: n.Iface, Domain: n.Domain}
@@ -187,7 +191,24 @@ func (s *Server) getNode(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, proto.ErrInternal, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, NodeDetail{Node: n, DriverProblem: s.core.DriverProblem(n.NodeID)})
+	httpx.WriteJSON(w, http.StatusOK, NodeDetail{Node: n, DriverProblem: s.core.DriverProblem(n.NodeID), NetTest: s.core.LastNetTest(n.NodeID)})
+}
+
+// netTest measures throughput between the Controller and a node (§16).
+func (s *Server) netTest(w http.ResponseWriter, r *http.Request) {
+	res, err := s.core.NetTest(r.Context(), r.PathValue("id"))
+	switch {
+	case err == nil:
+		httpx.WriteJSON(w, http.StatusOK, res)
+	case errors.Is(err, store.ErrNotFound):
+		httpx.WriteError(w, http.StatusNotFound, proto.ErrNotFound, "no such node")
+	case errors.Is(err, core.ErrNotAdopted):
+		httpx.WriteError(w, http.StatusConflict, proto.ErrWrongState, "only adopted nodes can be tested")
+	case errors.Is(err, core.ErrNetTestBusy):
+		httpx.WriteError(w, http.StatusConflict, "busy", err.Error())
+	default:
+		httpx.WriteError(w, http.StatusInternalServerError, proto.ErrInternal, err.Error())
+	}
 }
 
 // NodeDetail is one node with what the dashboard explains about it.
@@ -195,6 +216,8 @@ type NodeDetail struct {
 	*store.Node
 	// DriverProblem says why a node with an NVIDIA card gets no driver.
 	DriverProblem string `json:"driver_problem,omitempty"`
+	// NetTest is the latest network test since the Controller started.
+	NetTest *proto.NetTestResult `json:"net_test,omitempty"`
 }
 
 type AdoptRequest struct {

@@ -390,6 +390,9 @@ const (
 	// VersionSelfUpdate is "yes" when the node can install updates, else
 	// why not. Older agents don't report it and can't.
 	VersionSelfUpdate = "self_update"
+	// VersionPeerBlobs is "yes" when the node serves its model files to
+	// other nodes (§16).
+	VersionPeerBlobs = "peer_blobs"
 )
 
 const (
@@ -411,6 +414,33 @@ type Health struct {
 	Inference InferenceLoad `json:"inference"`
 	// Thermal is absent from agents older than temperature reporting (§15).
 	Thermal *Thermal `json:"thermal,omitempty"`
+	// Link is the network link the node reaches the Controller over (§16).
+	Link *Link `json:"link,omitempty"`
+}
+
+// Link describes a network interface's connection (§16).
+type Link struct {
+	Iface    string `json:"iface"`
+	Mbps     int    `json:"mbps"`             // negotiated speed; 0 when unknown
+	Duplex   string `json:"duplex,omitempty"` // full | half
+	Wireless bool   `json:"wireless,omitempty"`
+}
+
+// BlobSource tells a node where to download a model file from (§16):
+// another node that already has it, or the Controller when NodeID is empty.
+type BlobSource struct {
+	V        int    `json:"v"`
+	NodeID   string `json:"node_id,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"` // the peer agent's base URL
+}
+
+// NetTestResult is one Controller-to-node speed test (§16).
+type NetTestResult struct {
+	ToNodeMbps   float64   `json:"to_node_mbps"`
+	FromNodeMbps float64   `json:"from_node_mbps"`
+	Bytes        int64     `json:"bytes"`
+	At           time.Time `json:"at"`
+	Error        string    `json:"error,omitempty"`
 }
 
 // Thermal is the node's temperatures and fans (§15).

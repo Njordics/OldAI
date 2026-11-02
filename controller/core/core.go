@@ -25,6 +25,7 @@ import (
 	"aicluster/common/discovery"
 	"aicluster/common/pki"
 	"aicluster/common/proto"
+	"aicluster/common/registry"
 	"aicluster/common/selfupdate"
 	"aicluster/controller/drivers"
 	"aicluster/controller/modelcache"
@@ -80,6 +81,11 @@ type Config struct {
 	// GPU drivers (§14), e.g. http://archive.ubuntu.com/ubuntu. Empty turns
 	// GPU driver installs off.
 	AptMirror string
+	// PeerUploads is how many downloads one node serves to others at a
+	// time (§16; default 2, negative turns peer copying off). Files under
+	// PeerMinBlob bytes (default 64 MiB) always come from the Controller.
+	PeerUploads int
+	PeerMinBlob int64
 }
 
 func (c *Config) defaults() {
@@ -119,6 +125,12 @@ func (c *Config) defaults() {
 	if c.BuildCommit == "" {
 		c.BuildCommit = selfupdate.BuildCommit()
 	}
+	if c.PeerUploads == 0 {
+		c.PeerUploads = 2
+	}
+	if c.PeerMinBlob == 0 {
+		c.PeerMinBlob = 64 << 20
+	}
 }
 
 type Core struct {
@@ -147,6 +159,8 @@ type Core struct {
 	roll     rolloutState       // in-place update; see rollout.go
 	mirror   *drivers.Mirror    // nil when GPU drivers are off; see drivers.go
 	drv      driverState
+	peers    peerState // peer copying; see peers.go
+	nets     netTests
 
 	runCtx context.Context // Run's context, for work started by API calls
 }
@@ -188,6 +202,8 @@ func New(cfg Config, log *slog.Logger) (*Core, error) {
 		return nil, fmt.Errorf("model cache: %w", err)
 	}
 	c.Models.OnReady = c.onModelCached
+	c.peers = peerState{leases: map[string]*blobLease{}, avoid: map[string]time.Time{}, manifests: map[string][]registry.Descriptor{}}
+	c.nets.last = map[string]*proto.NetTestResult{}
 	c.setupDrivers()
 	if err := c.setupSlaveNet(ctx); err != nil {
 		log.Error("slave network disabled; Slaves stay on the home network", "err", err)

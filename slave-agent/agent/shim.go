@@ -98,6 +98,10 @@ func (a *Agent) handleShim(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node is not adopted", http.StatusServiceUnavailable)
 		return
 	}
+	// Large model files may come from another node that has them (§16).
+	if digest := blobDigest(path); digest != "" && r.Method == http.MethodGet && a.servePeerBlob(w, r, ad, digest) {
+		return
+	}
 	client := a.shimClient(ad)
 	var lastErr error
 	for _, ep := range a.endpointsOf(ad) {

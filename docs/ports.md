@@ -31,7 +31,7 @@ Pressing **Update** also fetches the release `update-<branch>` and its two asset
 |---|---|---|---|---|
 | 5353 | UDP | mDNS (Avahi) | LAN, multicast | — |
 | 47800 | UDP | beacon (send only; receives Controller beacon) | LAN, broadcast | none |
-| 7450 | TCP | agent: enrollment (pre-adoption, TLS) → command API + inference proxy (mTLS) | LAN before adoption; **Controller IPs only** after | mTLS |
+| 7450 | TCP | agent: enrollment (pre-adoption, TLS) → command API + inference proxy (mTLS); after adoption also pooled-model tunnels and model files for other nodes (protocol §16) | LAN before adoption; the Controller and the cluster's nodes after | mTLS |
 | 9464 | TCP | Prometheus metrics | Controller IPs only | none |
 
 Loopback only: registry shim `127.0.0.1:7452`, Ollama `127.0.0.1:11434`, llama.cpp server `127.0.0.1:18000+`, vLLM `127.0.0.1:18100+`, whisper `127.0.0.1:18200`.

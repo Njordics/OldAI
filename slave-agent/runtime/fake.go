@@ -38,7 +38,10 @@ func NewFake(dir string) *Fake {
 	return f
 }
 
-func (f *Fake) Kind() string                    { return "fake" }
+func (f *Fake) Kind() string { return "fake" }
+
+// BlobDir is where the fake runtime keeps model files.
+func (f *Fake) BlobDir() string                 { return filepath.Join(f.Dir, "blobs") }
 func (f *Fake) Check(ctx context.Context) error { return nil }
 
 func (f *Fake) index() (map[string]string, error) { // local name -> manifest JSON

@@ -209,6 +209,8 @@ function canAdopt(n) { return ["pending", "discovered", "released"].includes(n.s
 function canRelease(n) { return ["adopted", "offline", "enrolling"].includes(n.state); }
 
 function nodeNote(n) {
+  const slow = n.state === "adopted" && slowLink(n.health?.link);
+  if (slow) return `<div class="note bad">Network link: ${esc(slow)}</div>`;
   if (n.state === "pending" && n.pairing_required) return `<div class="note">Needs the pairing code from its screen</div>`;
   if (n.state === "foreign") return `<div class="note">Adopted by another cluster</div>`;
   if (n.returning && n.state !== "adopted") return `<div class="note">Known hardware (reinstalled or reset)</div>`;
@@ -330,6 +332,54 @@ function tempLabel(h) {
 
 const FAN_CONTROL = { agent: "boosted by the agent", firmware: "firmware (the agent can boost it)", fixed: "firmware only" };
 
+// Network links (protocol §16). Nodes are expected on 1 Gb copper; a cable
+// with a damaged pair often links at 100 Mb without any other sign.
+function slowLink(l) {
+  if (!l) return "";
+  if (l.wireless) return "Wi-Fi";
+  if (l.duplex === "half") return "half duplex";
+  if (l.mbps > 0 && l.mbps < 1000) return `${l.mbps} Mb/s`;
+  return "";
+}
+
+function linkLabel(l) {
+  if (!l) return `<span class="muted">not reported</span>`;
+  const speed = l.wireless ? "Wi-Fi" : l.mbps ? (l.mbps >= 1000 ? `${l.mbps / 1000} Gb/s` : `${l.mbps} Mb/s`) : "speed unknown";
+  const slow = slowLink(l);
+  const why = slow === "half duplex" ? "Half duplex usually means a speed or duplex mismatch with the switch."
+    : slow === "Wi-Fi" ? "Model downloads and pooled models are much slower over Wi-Fi; use a cable if you can."
+    : slow ? "Expected 1 Gb/s. Try another cable (all eight wires are needed for 1 Gb) or another switch port." : "";
+  return `<span class="${slow ? "bad-text" : ""}">${esc(speed)}${l.duplex ? ` ${esc(l.duplex)} duplex` : ""}</span> <span class="muted">· ${esc(l.iface)}</span>${why ? `<div class="muted">${why}</div>` : ""}`;
+}
+
+function netTestLabel(n) {
+  const t = n.net_test;
+  const busy = state.busy.has("nettest:" + n.node_id);
+  const button = `<button class="btn btn-sm" data-act="nettest" data-id="${esc(n.node_id)}" ${busy ? "disabled" : ""}>${busy ? "Testing…" : t ? "Test again" : "Test network"}</button>`;
+  if (!t) return `${button}<div class="muted">Measures the speed between the Controller and this node, both ways. Takes a few seconds and briefly uses the whole link.</div>`;
+  if (t.error) return `<span class="bad-text">${esc(t.error)}</span> ${button}`;
+  const worst = Math.min(t.to_node_mbps, t.from_node_mbps);
+  const linkMbps = n.health?.link?.mbps || 1000;
+  const note = worst < linkMbps * 0.6
+    ? `<div class="bad-text">Much slower than the ${linkMbps >= 1000 ? `${linkMbps / 1000} Gb` : `${linkMbps} Mb`} link should manage. Check the cable and switch, or whether something else is using the network.</div>` : "";
+  return `${Math.round(t.to_node_mbps)} Mb/s to the node · ${Math.round(t.from_node_mbps)} Mb/s from it <span class="muted">(${ago(t.at)})</span> ${button}${note}`;
+}
+
+async function runNetTest(id) {
+  state.busy.add("nettest:" + id);
+  renderDrawer();
+  try {
+    const r = await api("POST", `/api/v1/nodes/${encodeURIComponent(id)}/nettest`);
+    if (state.detail?.node_id === id) state.detail.net_test = r;
+  } catch (e) {
+    if (e instanceof AuthError) return showLogin();
+    toast(e.message, true);
+  } finally {
+    state.busy.delete("nettest:" + id);
+    renderDrawer();
+  }
+}
+
 // thermalSection lists a node's temperatures, GPUs and fans.
 function thermalSection(h) {
   const t = h.thermal;
@@ -383,6 +433,8 @@ function renderDrawer() {
   parts.push(`<div class="section"><h3>Overview</h3>${kv([
     ["Address", `<span class="mono">${esc(n.addr || "—")}${n.port ? ":" + n.port : ""}</span>`],
     obs?.network ? ["Network", networkLabel(obs.network)] : null,
+    n.state === "adopted" || n.state === "offline" ? ["Link", linkLabel(h.link)] : null,
+    n.state === "adopted" && state.detail ? ["Speed test", netTestLabel(n)] : null,
     ["Hardware", hwLabel(n.hw_summary)],
     ["Agent", esc(n.agent_version || "—")],
     ["Phase", esc(n.phase || "—")],
@@ -483,6 +535,7 @@ function renderSettings() {
     ["Cluster ID", `<span class="mono">${esc(c.cluster_id)}</span>`],
     ["CA fingerprint", `<span class="mono">${esc(c.ca_fp)}</span>`],
     ["Controller certificate", `<span class="mono">${esc(c.controller_fp)}</span>`],
+    ["Controller link", linkLabel(c.controller_link) + `<div class="muted">Every model a node doesn't get from another node comes through this link.</div>`],
     ["Node API endpoints", (c.endpoints || []).map(e => `<div class="mono">${esc(e)}</div>`).join("") || "—"],
     ["Slave network", c.slave_net
       ? `<span class="mono">${esc(c.slave_net.subnet)}</span> on ${esc(c.slave_net.iface)}<div class="muted">The Controller (${esc(c.slave_net.controller_ip)}) is the DHCP and DNS server for adopted nodes. Other devices on your network are not affected.</div>`
@@ -774,6 +827,7 @@ const actions = {
   adopt: id => openAdopt(id),
   release: id => openRelease(id),
   details: id => openDrawer(id),
+  nettest: id => runNetTest(id),
 };
 
 async function boot() {
